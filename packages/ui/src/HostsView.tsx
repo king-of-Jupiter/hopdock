@@ -59,9 +59,6 @@ export function HostsView({ groups, hosts, onOpenTerminal, onOpenSftp, onNew, on
         <button className="hd-btn primary" type="button" onClick={onNew}>
           NEW HOST ▾
         </button>
-        <button className="hd-btn" type="button" disabled title="Local terminal after v0.0.1">
-          TERMINAL
-        </button>
         <div className="hd-search" style={{ marginLeft: 'auto' }}>
           <span>⌕</span>
           <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search hosts, tags..." />
