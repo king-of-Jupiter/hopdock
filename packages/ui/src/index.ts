@@ -13,5 +13,6 @@ export { SnippetsView } from './SnippetsView';
 export { SettingsView } from './SettingsView';
 export { ContextMenu } from './ContextMenu';
 export type { MenuItem } from './ContextMenu';
+export { Icons } from './icons';
 export { osTile } from './os';
 export type * from './preload-api';

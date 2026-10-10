@@ -68,7 +68,13 @@ export function SnippetsView({ snippets, hosts, onChanged }: Props) {
         </select>
         {err && <span style={{ color: 'var(--hd-danger)', fontSize: 12 }}>{err}</span>}
       </div>
-      <div className="hd-list">
+      {list.length === 0 ? (
+        <div className="hd-empty" data-testid="snippets-empty">
+          <h2>No snippets here</h2>
+          <p>Save a command once, run it on any host with variables.</p>
+        </div>
+      ) : (
+      <div className="hd-list" data-testid="snippets-table">
         <table className="hd-table">
           <thead>
             <tr><th>Name</th><th>Folder</th><th>Script</th><th></th></tr>
@@ -110,6 +116,7 @@ export function SnippetsView({ snippets, hosts, onChanged }: Props) {
           </tbody>
         </table>
       </div>
+      )}
       {result && (
         <div className="hd-modal" style={{ marginTop: 12 }}>
           <h2>{result.name}</h2>

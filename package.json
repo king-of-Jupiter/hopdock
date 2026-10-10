@@ -9,9 +9,12 @@
   ],
   "scripts": {
     "dev": "npm run dev --workspace apps/desktop",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test:ssh": "npm run test:e2e --workspace packages/ssh",
+    "test:ui": "node tests/ui/smoke.mjs"
   },
   "devDependencies": {
+    "playwright": "^1.64.0",
     "tsx": "^4.23.15"
   }
 }

@@ -49,6 +49,7 @@ export function SftpView({ host }: { host: Host | null }) {
   const [sel, setSel] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
 
@@ -71,8 +72,8 @@ export function SftpView({ host }: { host: Host | null }) {
 
   useEffect(() => {
     if (host) {
-      void load('left', '/root');
-      void load('right', '/root');
+      setLoading(true);
+      void Promise.all([load('left', '/root'), load('right', '/root')]).finally(() => setLoading(false));
     }
   }, [host, load]);
 
@@ -134,7 +135,14 @@ export function SftpView({ host }: { host: Host | null }) {
           ))}
         </div>
         <div style={{ overflowY: 'auto' }}>
-          <table className="hd-table">
+          {loading && st.entries.length === 0 ? (
+            <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }} data-testid="sftp-skeleton">
+              {[0, 1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="hd-sk" style={{ height: 34 }} />
+              ))}
+            </div>
+          ) : (
+          <table className="hd-table" data-testid="sftp-table">
             <thead>
               <tr><th>Name</th><th>Date Modified</th><th>Size</th></tr>
             </thead>
@@ -142,6 +150,8 @@ export function SftpView({ host }: { host: Host | null }) {
               {st.entries.filter((e) => e.filename !== '.' && e.filename !== '..').map((e) => (
                 <tr
                   key={e.filename}
+                  data-testid="sftp-row"
+                  data-name={e.filename}
                   className={'row' + (sel === `${side}:${e.filename}` ? ' sel' : '')}
                   onClick={() => { setActive(side); setSel(`${side}:${e.filename}`); }}
                   onDoubleClick={() => {
@@ -176,6 +186,7 @@ export function SftpView({ host }: { host: Host | null }) {
               ))}
             </tbody>
           </table>
+          )}
         </div>
       </div>
     );

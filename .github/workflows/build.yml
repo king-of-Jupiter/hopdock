@@ -7,6 +7,21 @@ on:
   workflow_dispatch:
 
 jobs:
+  qa:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npm run typecheck
+      - run: npm run test:ssh
+      - run: npx playwright install --with-deps chromium
+      - run: npm run build --workspace apps/desktop
+      - run: npm run test:ui
+
   dist:
     strategy:
       matrix:

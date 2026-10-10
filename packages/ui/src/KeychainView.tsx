@@ -60,7 +60,13 @@ export function KeychainView({ keys, hosts, onChanged }: Props) {
         </button>
         {err && <span style={{ color: 'var(--hd-danger)', fontSize: 12 }}>{err}</span>}
       </div>
-      <div className="hd-list">
+      {keys.length === 0 ? (
+        <div className="hd-empty" data-testid="keys-empty">
+          <h2>No keys yet</h2>
+          <p>Generate an ed25519 key or import an existing private key. Private material never leaves this device.</p>
+        </div>
+      ) : (
+      <div className="hd-list" data-testid="keys-table">
         <table className="hd-table">
           <thead>
             <tr><th>Name</th><th>Type</th><th>Fingerprint</th><th>Updated</th><th></th></tr>
@@ -85,6 +91,7 @@ export function KeychainView({ keys, hosts, onChanged }: Props) {
           </tbody>
         </table>
       </div>
+      )}
       {showPub && (
         <div className="hd-modal" style={{ marginTop: 12 }}>
           <h2>Public key</h2>

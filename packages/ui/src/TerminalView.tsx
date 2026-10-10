@@ -98,7 +98,7 @@ export function TerminalView({ host }: { host: Host }) {
   }, [host.id, attempt]);
 
   return (
-    <div className="hd-term-wrap">
+    <div className="hd-term-wrap" data-testid="terminal" data-status={status}>
       <div className="hd-term-bar">
         <span className="hd-badge ok">{status === 'live' ? 'Connected' : status}</span>
         <span>

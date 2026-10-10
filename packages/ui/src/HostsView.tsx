@@ -20,6 +20,7 @@ export function HostsView({ groups, hosts, onOpenTerminal, onOpenSftp, onNew, on
   const q = query.trim().toLowerCase();
   const match = (h: Host) =>
     !q || h.name.toLowerCase().includes(q) || h.host.toLowerCase().includes(q) || h.username.toLowerCase().includes(q) || h.tags.some((t) => t.toLowerCase().includes(q));
+  const visible = hosts.filter(match);
 
   const card = (h: Host) => {
     const tile = osTile(h);
@@ -27,6 +28,8 @@ export function HostsView({ groups, hosts, onOpenTerminal, onOpenSftp, onNew, on
       <div
         key={h.id}
         className="hd-card"
+        data-testid="host-card"
+        data-name={h.name}
         onClick={() => onOpenTerminal(h)}
         onContextMenu={(e) => {
           e.preventDefault();
@@ -61,7 +64,7 @@ export function HostsView({ groups, hosts, onOpenTerminal, onOpenSftp, onNew, on
         </button>
         <div className="hd-search" style={{ marginLeft: 'auto' }}>
           <span>⌕</span>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search hosts, tags..." />
+          <input data-testid="host-search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search hosts, tags..." />
         </div>
       </div>
       <div className="hd-sec">Groups</div>
@@ -82,7 +85,17 @@ export function HostsView({ groups, hosts, onOpenTerminal, onOpenSftp, onNew, on
         })}
       </div>
       <div className="hd-sec">Hosts</div>
-      <div className="hd-grid">{hosts.filter(match).map(card)}</div>
+      {visible.length === 0 ? (
+        <div className="hd-empty" data-testid="hosts-empty">
+          <h2>No hosts match “{query.trim()}”</h2>
+          <p>Try a different search, or add a new host.</p>
+          <button className="hd-btn" type="button" onClick={() => setQuery('')}>
+            Clear search
+          </button>
+        </div>
+      ) : (
+        <div className="hd-grid">{visible.map(card)}</div>
+      )}
       {menu && <ContextMenu x={menu.x} y={menu.y} items={menu.items} onClose={() => setMenu(null)} />}
     </>
   );
