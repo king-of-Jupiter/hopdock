@@ -1,0 +1,138 @@
+import { useMemo, useState } from 'react';
+import type { Host, Snippet } from '@hopdock/core';
+
+interface Props {
+  snippets: Snippet[];
+  hosts: Host[];
+  onChanged: () => void;
+}
+
+export function SnippetsView({ snippets, hosts, onChanged }: Props) {
+  const folders = useMemo(() => [...new Set(snippets.map((s) => s.folder))], [snippets]);
+  const [folder, setFolder] = useState<string | null>(null);
+  const [targetId, setTargetId] = useState(hosts[0]?.id ?? '');
+  const [varValues, setVarValues] = useState<Record<string, Record<string, string>>>({});
+  const [result, setResult] = useState<{ name: string; out: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [editing, setEditing] = useState<{ id?: string; name: string; folder: string; script: string } | null>(null);
+
+  const list = folder ? snippets.filter((s) => s.folder === folder) : snippets;
+
+  const saveSnippet = async () => {
+    if (!editing || !editing.name.trim() || !editing.script.trim()) return;
+    setBusy(true);
+    try {
+      await window.hopdock.snippets.save({ name: editing.name.trim(), folder: editing.folder.trim() || 'general', script: editing.script }, editing.id);
+      setEditing(null);
+      onChanged();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const run = async (s: Snippet) => {
+    if (!targetId) {
+      setErr('Pick a target host first.');
+      return;
+    }
+    setBusy(true);
+    setErr('');
+    try {
+      const r = await window.hopdock.snippets.run(s.id, targetId, varValues[s.id] ?? {});
+      setResult({ name: s.name, out: `$ exit ${r.code}\n--- stdout ---\n${r.stdout}\n--- stderr ---\n${r.stderr}` });
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="hd-toolbar">
+        <button className="hd-btn primary" type="button" onClick={() => setEditing({ name: '', folder: folder ?? 'general', script: '' })}>
+          NEW SNIPPET
+        </button>
+        <select className="hd-input" style={{ maxWidth: 220 }} value={folder ?? ''} onChange={(e) => setFolder(e.target.value || null)}>
+          <option value="">All folders</option>
+          {folders.map((f) => (
+            <option key={f} value={f}>{f}</option>
+          ))}
+        </select>
+        <select className="hd-input" style={{ maxWidth: 260 }} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+          {hosts.map((h) => (
+            <option key={h.id} value={h.id}>{h.name} ({h.username}@{h.host})</option>
+          ))}
+        </select>
+        {err && <span style={{ color: 'var(--hd-danger)', fontSize: 12 }}>{err}</span>}
+      </div>
+      <div className="hd-list">
+        <table className="hd-table">
+          <thead>
+            <tr><th>Name</th><th>Folder</th><th>Script</th><th></th></tr>
+          </thead>
+          <tbody>
+            {list.map((s) => (
+              <tr key={s.id}>
+                <td><strong>{s.name}</strong></td>
+                <td><span className="hd-badge">{s.folder}</span></td>
+                <td>
+                  <code style={{ fontFamily: 'var(--hd-font-mono)', fontSize: 12 }}>{s.script}</code>
+                  {s.vars.length > 0 && (
+                    <div className="hd-row" style={{ marginTop: 6 }}>
+                      {s.vars.map((v) => (
+                        <input
+                          key={v}
+                          className="hd-input"
+                          placeholder={`$${v}`}
+                          value={varValues[s.id]?.[v] ?? ''}
+                          onChange={(e) => setVarValues((prev) => ({ ...prev, [s.id]: { ...prev[s.id], [v]: e.target.value } }))}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </td>
+                <td style={{ whiteSpace: 'nowrap' }}>
+                  <button className="hd-btn primary" type="button" disabled={busy} onClick={() => void run(s)}>
+                    Run
+                  </button>{' '}
+                  <button className="hd-btn" type="button" disabled={busy} onClick={() => setEditing({ id: s.id, name: s.name, folder: s.folder, script: s.script })}>
+                    Edit
+                  </button>{' '}
+                  <button className="hd-btn" type="button" disabled={busy} onClick={() => { if (window.confirm(`Delete ${s.name}?`)) void window.hopdock.snippets.remove(s.id).then(() => onChanged()); }}>
+                    Delete
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {result && (
+        <div className="hd-modal" style={{ marginTop: 12 }}>
+          <h2>{result.name}</h2>
+          <pre>{result.out}</pre>
+          <button className="hd-btn" type="button" onClick={() => setResult(null)}>Close</button>
+        </div>
+      )}
+      {editing && (
+        <div className="hd-overlay" onClick={() => setEditing(null)}>
+          <div className="hd-modal" onClick={(e) => e.stopPropagation()}>
+            <h2>{editing.id ? 'Edit snippet' : 'New snippet'}</h2>
+            <div className="hd-form">
+              <label>Name<input className="hd-input" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
+              <label>Folder<input className="hd-input" value={editing.folder} onChange={(e) => setEditing({ ...editing, folder: e.target.value })} /></label>
+              <label>Script (use ${`{var}`} for inputs)<textarea className="hd-input mono" rows={5} value={editing.script} onChange={(e) => setEditing({ ...editing, script: e.target.value })} /></label>
+              <div className="hd-row" style={{ justifyContent: 'flex-end' }}>
+                <button className="hd-btn" type="button" onClick={() => setEditing(null)}>Cancel</button>
+                <button className="hd-btn primary" type="button" disabled={busy} onClick={() => void saveSnippet()}>Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}

@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "baseUrl": ".",
+    "paths": {
+      "@hopdock/core": ["packages/core/src"],
+      "@hopdock/ssh": ["packages/ssh/src"],
+      "@hopdock/sync": ["packages/sync/src"],
+      "@hopdock/ui": ["packages/ui/src"]
+    }
+  }
+}
