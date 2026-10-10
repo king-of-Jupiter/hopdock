@@ -25,6 +25,8 @@ function b64decode(b64: string): Uint8Array {
   return out;
 }
 
+const textDecoder = new TextDecoder();
+
 export function TerminalView({ host }: { host: Host }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<'connecting' | 'live' | 'closed' | 'error'>('connecting');
@@ -50,7 +52,7 @@ export function TerminalView({ host }: { host: Host }) {
     fit.fit();
 
     const offData = window.hopdock.ssh.onData((e) => {
-      if (e.id === host.id && alive) term.write(b64decode(e.data));
+      if (e.id === host.id && alive) term.write(textDecoder.decode(b64decode(e.data)));
     });
     const offClose = window.hopdock.ssh.onClose((e) => {
       if (e.id === host.id && alive) setStatus('closed');
