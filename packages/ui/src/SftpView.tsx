@@ -10,6 +10,21 @@ interface Pane {
   entries: DirEntry[];
 }
 
+function FolderIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" style={{ verticalAlign: -2, marginRight: 6 }}>
+      <path d="M1 3.5A1.5 1.5 0 0 1 2.5 2h3l1.5 2h6A1.5 1.5 0 0 1 14.5 5.5v6a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 1.5 11.5v-8z" fill="#5aa9e6" />
+    </svg>
+  );
+}
+
+function FileIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" style={{ verticalAlign: -2, marginRight: 6 }}>
+      <path d="M3 1.5A1.5 1.5 0 0 1 4.5 0H9l4 4v10.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 14.5v-13z" fill="#8b94a3" />
+    </svg>
+  );
+}
 function fmtSize(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} kB`;
@@ -152,7 +167,7 @@ export function SftpView({ host }: { host: Host | null }) {
                   }}
                 >
                   <td>
-                    {e.isDirectory ? '📁' : '📄'} {e.filename}
+                    {e.isDirectory ? <FolderIcon /> : <FileIcon />}{e.filename}
                     <span className="perm">{perms(e.mode)}</span>
                   </td>
                   <td>{fmtDate(e.mtime)}</td>
