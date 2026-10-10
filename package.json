@@ -1,6 +1,6 @@
 {
   "name": "hopdock",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "private": true,
   "description": "Hopdock — desktop SSH client, Termius-like MVP (Electron + React + TS)",
   "workspaces": [
