@@ -49,8 +49,20 @@ const USER = 'tester';
 const PASS = 'secret-e2e';
 const failures: string[] = [];
 
-function check(name: string, cond: boolean, extra = ''): void {
-  if (cond) {
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function waitFor(cond: () => boolean, timeoutMs = 5000): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (cond()) return true;
+    await sleep(50);
+  }
+  return cond();
+}
+
+function check(name: string, cond: boolean, extra = ''): void {  if (cond) {
     console.log(`ok   ${name}`);
   } else {
     console.log(`FAIL ${name} ${extra}`);
@@ -244,14 +256,17 @@ async function main(): Promise<void> {
 
   try {
     await mgr.connect(sid, { host: '127.0.0.1', port, username: USER, password: PASS });
-    check('connect + shell banner', events.some((e) => e.channel === 'ssh:data'));
+    const bannerArrived = await waitFor(() => events.some((e) => e.channel === 'ssh:data'));
+    check('connect + shell banner', bannerArrived);
 
     mgr.write(sid, Buffer.from('ping-e2e\n').toString('base64'));
-    await new Promise((r) => setTimeout(r, 400));
-    const blob = events
-      .filter((e) => e.channel === 'ssh:data')
-      .map((e) => Buffer.from((e.payload as { data: string }).data, 'base64').toString())
-      .join('');
+    const blobOf = () =>
+      events
+        .filter((e) => e.channel === 'ssh:data')
+        .map((e) => Buffer.from((e.payload as { data: string }).data, 'base64').toString())
+        .join('');
+    await waitFor(() => blobOf().includes('echo:ping-e2e'));
+    const blob = blobOf();
     check('shell echo round-trip', blob.includes('echo:ping-e2e'), blob.slice(-120));
 
     const exec = await mgr.exec(sid, 'echo test-123');
