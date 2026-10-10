@@ -59,6 +59,7 @@
     },
     "dmg": {
       "background": "build/dmg-background.png",
+      "icon": "build/icon.png",
       "iconSize": 100,
       "window": {
         "width": 540,

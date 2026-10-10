@@ -22,11 +22,5 @@ jobs:
       - run: npm run typecheck
       - run: npm run build --workspace apps/desktop
       - run: npm run dist --workspace apps/desktop
-      - uses: actions/upload-artifact@v4
-        with:
-          name: hopdock-${{ matrix.os }}
-          path: |
-            apps/desktop/dist/*.AppImage
-            apps/desktop/dist/*.dmg
-            apps/desktop/dist/*.exe
-          if-no-files-found: error
+      # No artifact upload on purpose: Actions zips everything, and binaries
+      # ship natively via GitHub Releases on tags (see release.yml).
