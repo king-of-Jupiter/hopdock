@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { SyncStatus } from './preload-api';
+import type { SyncStatus, UpdateStatus } from './preload-api';
 
 export function SettingsView() {
   const [url, setUrl] = useState('');
@@ -7,6 +7,7 @@ export function SettingsView() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [status, setStatus] = useState<SyncStatus | null>(null);
+  const [update, setUpdate] = useState<UpdateStatus>({ state: 'idle' });
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -19,6 +20,7 @@ export function SettingsView() {
   };
   useEffect(() => {
     void refresh();
+    return window.hopdock.updater.onStatus(setUpdate);
   }, []);
 
   const save = async () => {
@@ -52,6 +54,25 @@ export function SettingsView() {
 
   return (
     <div style={{ maxWidth: 560 }}>
+      <div className="hd-sec">Application updates</div>
+      <div className="hd-card" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'stretch' }}>
+        <div style={{ fontSize: 13 }}>
+          Current version: <strong>{window.hopdock?.version ?? 'dev'}</strong>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--hd-muted)', marginTop: 4 }}>
+          {update.state === 'idle' && 'Updates install automatically from GitHub Releases.'}
+          {update.state === 'checking' && 'Checking for updates…'}
+          {update.state === 'available' && `Update ${update.version ?? ''} found, downloading…`}
+          {update.state === 'downloading' && `Downloading… ${update.percent ?? 0}%`}
+          {update.state === 'downloaded' && `Version ${update.version ?? ''} downloaded — restart to install.`}
+          {update.state === 'error' && `Update check failed: ${update.message ?? 'unknown error'}`}
+        </div>
+        <div className="hd-row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
+          <button className="hd-btn" type="button" disabled={busy} onClick={() => void window.hopdock.updater.check()}>
+            Check for updates
+          </button>
+        </div>
+      </div>
       <div className="hd-sec">Encrypted vault sync (Supabase)</div>
       <div className="hd-card" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'stretch' }}>
         <div className="hd-form">

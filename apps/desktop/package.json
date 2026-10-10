@@ -1,6 +1,6 @@
 {
   "name": "hopdock-desktop",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",
@@ -8,10 +8,12 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p .",
-    "dist": "npm run build && electron-builder --publish never"
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:publish": "npm run build && electron-builder --publish always"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.117.3",
+    "electron-updater": "^6.8.9",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "ssh2": "^1.17.0",
@@ -41,15 +43,27 @@
       "out/**/*"
     ],
     "linux": {
-      "target": ["AppImage"],
+      "target": [
+        "AppImage"
+      ],
       "category": "Utility"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "category": "public.app-category.developer-tools"
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "king-of-Jupiter",
+      "repo": "hopdock",
+      "releaseType": "release"
     }
   }
 }

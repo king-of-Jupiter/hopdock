@@ -1,6 +1,7 @@
 import { app, BrowserWindow } from 'electron';
 import { join } from 'path';
 import { registerIpc, setWindow } from './ipc';
+import { checkOnStartup, setupAutoUpdater } from './updater';
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -14,6 +15,8 @@ function createWindow(): void {
   });
   setWindow(win);
   registerIpc();
+  setupAutoUpdater((channel, payload) => win.webContents.send(channel, payload));
+  checkOnStartup();
 
   const url = process.env['ELECTRON_RENDERER_URL'];
   if (url) {

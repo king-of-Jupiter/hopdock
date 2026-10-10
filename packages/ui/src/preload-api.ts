@@ -43,6 +43,13 @@ export interface SyncStatus {
   lastError: string | null;
 }
 
+export interface UpdateStatus {
+  state: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'error';
+  version?: string;
+  message?: string;
+  percent?: number;
+}
+
 export interface HopdockApi {
   version: string;
   vault: {
@@ -86,5 +93,9 @@ export interface HopdockApi {
     status(): Promise<SyncStatus>;
     saveCreds(creds: SyncCredsInput): Promise<void>;
     syncNow(): Promise<{ pushed: number; pulled: number }>;
+  };
+  updater: {
+    check(): Promise<void>;
+    onStatus(cb: (s: UpdateStatus) => void): () => void;
   };
 }

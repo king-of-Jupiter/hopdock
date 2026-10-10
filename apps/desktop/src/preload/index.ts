@@ -52,6 +52,10 @@ const api: HopdockApi = {
     saveCreds: (creds) => ipcRenderer.invoke('sync:saveCreds', creds),
     syncNow: () => ipcRenderer.invoke('sync:now'),
   },
+  updater: {
+    check: () => ipcRenderer.invoke('updater:check'),
+    onStatus: (cb) => on('updater:status', cb),
+  },
 };
 
 contextBridge.exposeInMainWorld('hopdock', api);
