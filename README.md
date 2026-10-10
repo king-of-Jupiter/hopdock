@@ -19,6 +19,12 @@ packages/ui        design tokens (CSS vars) + AppShell/Sidebar/HostList/HostForm
 supabase/          (M3+) schema + RLS for personal/shared vault sync
 ```
 
+## Screenshots (v0.0.1, dark)
+
+| Hosts | Terminal | SFTP |
+|---|---|---|
+| ![Hosts](docs/screenshots/hosts.png) | ![Terminal](docs/screenshots/terminal.png) | ![SFTP](docs/screenshots/sftp.png) |
+
 ## Milestones
 
 - M0 — shell + hosts UI on mocks (this scaffold)
