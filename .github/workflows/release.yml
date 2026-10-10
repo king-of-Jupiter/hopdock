@@ -28,3 +28,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run dist:publish --workspace apps/desktop
+      - name: smoke (headless launch check, linux only)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a ./apps/desktop/dist/linux-unpacked/hopdock-desktop --no-sandbox --hopdock-smoke

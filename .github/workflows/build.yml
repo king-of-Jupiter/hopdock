@@ -22,5 +22,8 @@ jobs:
       - run: npm run typecheck
       - run: npm run build --workspace apps/desktop
       - run: npm run dist --workspace apps/desktop
+      - name: smoke (headless launch check, linux only)
+        if: matrix.os == 'ubuntu-latest'
+        run: xvfb-run -a ./apps/desktop/dist/linux-unpacked/hopdock-desktop --no-sandbox --hopdock-smoke
       # No artifact upload on purpose: Actions zips everything, and binaries
       # ship natively via GitHub Releases on tags (see release.yml).

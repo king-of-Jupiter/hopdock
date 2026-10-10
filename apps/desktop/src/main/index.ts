@@ -27,6 +27,12 @@ function createWindow(): void {
 }
 
 void app.whenReady().then(() => {
+  if (process.argv.includes('--hopdock-smoke')) {
+    // CI headless launch check: proves main-process imports resolve.
+    console.log('hopdock smoke ok');
+    app.exit(0);
+    return;
+  }
   createWindow();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();

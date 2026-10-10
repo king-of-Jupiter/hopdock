@@ -1,5 +1,7 @@
 import { BrowserWindow, app, dialog, ipcMain } from 'electron';
-import { autoUpdater } from 'electron-updater';
+import updaterPkg from 'electron-updater';
+
+const { autoUpdater } = updaterPkg;
 
 export type UpdaterSink = (channel: string, payload: unknown) => void;
 
