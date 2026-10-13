@@ -277,6 +277,19 @@ export function registerIpc(): void {
     return host;
   });
 
+  handleIpc('vault:moveHost', (_e, id: string, groupId: string | null) => {
+    const v = vault();
+    const host = v.hosts.find((h) => h.id === id);
+    if (!host) throw new Error('unknown host');
+    if (groupId !== null && !v.groups.some((g) => g.id === groupId && g.vaultId === host.vaultId)) throw new Error('unknown group');
+    if ((host.groupId ?? null) !== groupId) {
+      host.groupId = groupId;
+      host.updatedAt = new Date().toISOString();
+      saveVault(v);
+    }
+    return host;
+  });
+
   handleIpc('vault:deleteHost', (_e, id: string) => {
     requireSyncIdle();
     const v = vault();

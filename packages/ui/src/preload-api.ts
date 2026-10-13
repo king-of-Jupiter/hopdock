@@ -86,6 +86,7 @@ export interface HopdockApi {
     readHostPassword(id: string): Promise<string>;
     saveHost(input: SaveHostInput, id?: string): Promise<Host>;
     saveGroup(name: string): Promise<HostGroup>;
+    moveHost(id: string, groupId: string | null): Promise<Host>;
     importTermius(): Promise<TermiusImportResult>;
     deleteHost(id: string): Promise<void>;
     setSecret(key: string, value: string): Promise<void>;

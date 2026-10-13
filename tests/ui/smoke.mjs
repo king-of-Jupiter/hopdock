@@ -103,6 +103,23 @@ try {
   check('background failure has a safe fallback without raw secrets', !(await page.locator('.hd-error-notifications').innerText()).includes('DO_NOT_SHOW_THIS'));
   await page.getByRole('button', { name: 'Dismiss error', exact: true }).click();
 
+  await page.goto(URL);
+  const draggedHost = page.locator('[data-name="web-01"]');
+  await draggedHost.dragTo(page.getByRole('button', { name: 'Staging 2 hosts' }));
+  await page.getByRole('button', { name: 'Staging 3 hosts' }).waitFor();
+  check('mouse drag moves host to group without opening terminal', (await page.evaluate(() => window.hopdock.vault.get())).hosts.find((h) => h.id === 'web-01').groupId === 'g-staging' && await page.getByTestId('host-search').isVisible());
+  await page.getByRole('button', { name: 'Staging 3 hosts' }).click();
+  const origin = await draggedHost.boundingBox();
+  await page.mouse.move(origin.x + 40, origin.y + 30); await page.mouse.down();
+  await page.mouse.move(origin.x + 60, origin.y + 35, { steps: 5 });
+  const ungrouped = page.getByTestId('ungrouped-drop-target'); await ungrouped.waitFor();
+  const destination = await ungrouped.boundingBox();
+  await page.mouse.move(destination.x + 40, destination.y + 20, { steps: 10 });
+  check('group drag reveals and highlights ungrouped destination', (await ungrouped.getAttribute('class')).includes('hd-drop-active'));
+  await page.mouse.up();
+  await ungrouped.waitFor({ state: 'hidden' });
+  check('mouse drop removes group membership', (await page.evaluate(() => window.hopdock.vault.get())).hosts.find((h) => h.id === 'web-01').groupId === null);
+
   check('no page errors', errors.length === 0, errors.join(' | '));
 } catch (e) {
   check('smoke completed', false, String(e).slice(0, 300));

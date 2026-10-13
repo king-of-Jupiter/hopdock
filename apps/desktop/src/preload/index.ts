@@ -28,6 +28,7 @@ const api: HopdockApi = {
     readHostPassword: (id) => invoke('vault:readHostPassword', id),
     saveHost: (input, id) => invoke('vault:saveHost', input, id),
     saveGroup: (name) => invoke('vault:saveGroup', name),
+    moveHost: (id, groupId) => invoke('vault:moveHost', id, groupId),
     importTermius: () => invoke('vault:importTermius'),
     deleteHost: (id) => invoke('vault:deleteHost', id),
     setSecret: (key, value) => invoke('vault:setSecret', key, value),

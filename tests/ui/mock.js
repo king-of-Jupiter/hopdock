@@ -125,6 +125,7 @@
       readHostPassword: function () { return Promise.resolve('preview-password'); },
       importTermius: function () { return Promise.resolve({ hosts: 0, groups: 0, keys: 0, snippets: 0, skipped: 0, warnings: [] }); },
       saveGroup: function (name) { var existing = groups.find(function (g) { return g.name.toLowerCase() === name.trim().toLowerCase(); }); if (existing) return Promise.resolve(existing); var g = { id: 'g-' + Date.now(), vaultId: 'v-personal', name: name.trim(), sort: groups.length }; groups.push(g); return Promise.resolve(g); },
+      moveHost: function (id, groupId) { var host = hosts.find(function (h) { return h.id === id; }); if (!host) return Promise.reject(new Error('unknown host')); host.groupId = groupId; host.updatedAt = new Date().toISOString(); return Promise.resolve(host); },
       saveHost: function (input, id) {
         var h = { id: id || 'h-' + Date.now(), vaultId: 'v-personal', groupId: input.groupId || null, name: input.name, host: input.host, port: input.port, username: input.username, auth: input.auth, portForwards: [], tags: input.tags, remark: '', sort: 99, starred: false, updatedAt: '' };
         hosts = hosts.filter(function (entry) { return entry.id !== h.id; }); hosts.push(h);
