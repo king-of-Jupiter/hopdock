@@ -159,6 +159,8 @@ try {
     const denied = await page.evaluate(async (id) => { try { await window.hopdock.sftp.copy(id, '/root/hello.txt', '/root/./hello.txt'); return ''; } catch (error) { return String(error); } }, `sftp:${hostId}`);
     assert.match(denied, /same file/); assert.equal(fs.readFileSync(join(remoteRoot, 'root/hello.txt'), 'utf8'), 'hello-local-ssh');
     await right.getByTestId('sftp-row').filter({ hasText: 'target' }).dblclick();
+    // Wait for navigation before opening a menu whose enabled state uses both paths.
+    await expect(right.locator('.hd-crumb').getByRole('button', { name: 'target', exact: true })).toBeVisible();
     await left.getByTestId('sftp-row').filter({ hasText: 'hello.txt' }).click({ button: 'right' });
     await page.getByText('Copy to target directory', { exact: true }).click();
     await expect(right.getByTestId('sftp-row').filter({ hasText: 'hello.txt' })).toHaveCount(1);
