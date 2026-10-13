@@ -11,6 +11,7 @@ python = venv / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
 if not python.exists():
     subprocess.run([sys.executable, '-m', 'venv', str(venv)], check=True)
 subprocess.run([str(python), '-m', 'pip', 'install', '--no-deps', '-r', str(root / 'tools/termius-reader-requirements.txt')], check=True)
+subprocess.run([str(python), '-m', 'pip', 'check'], check=True)
 output = root / 'apps/desktop/resources/termius-reader'
 work = root / '.termius-reader-build'
 subprocess.run([str(python), '-m', 'PyInstaller', '--noconfirm', '--onedir', '--console', '--noupx', '--name', 'hopdock-termius-reader', '--distpath', str(output.parent), '--workpath', str(work / 'work'), '--specpath', str(work), '--collect-all', 'ccl_chromium_reader', '--collect-all', 'nacl', '--hidden-import', '_cffi_backend', '--paths', str(root / 'tools'), str(root / 'tools/termius-reader.py')], check=True)
