@@ -112,7 +112,7 @@
   }
 
   window.hopdock = {
-    version: '0.0.6',
+    version: '0.0.7',
     files: {
       pick: function () { return Promise.resolve(null); },
       places: function () { return Promise.resolve([{ name: 'Home', path: '/home/demo' }, { name: 'Downloads', path: '/home/demo/Downloads' }]); },

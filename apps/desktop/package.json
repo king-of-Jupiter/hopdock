@@ -1,6 +1,6 @@
 {
   "name": "hopdock-desktop",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "private": true,
   "type": "module",
   "main": "./out/main/index.js",
@@ -46,8 +46,14 @@
       "out/**/*"
     ],
     "extraResources": [
-      { "from": "resources/termius-reader", "to": "termius-reader" },
-      { "from": "build/app-update.yml", "to": "app-update.yml" }
+      {
+        "from": "resources/termius-reader",
+        "to": "termius-reader"
+      },
+      {
+        "from": "build/app-update.yml",
+        "to": "app-update.yml"
+      }
     ],
     "linux": {
       "target": [
