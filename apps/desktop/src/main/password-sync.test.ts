@@ -44,6 +44,24 @@ test('groups created after initial sync upload and restore on another device', a
   assert.equal(other.vault.groups[0]?.name, 'New group');
 });
 
+test('unchanged sync is quiet with Postgres timestamp formatting and an older edit from another device', async () => {
+  const remote = server();
+  const transport = {
+    pull: async (since: string) => structuredClone([...remote.rows.values()].filter((row) => Date.parse(row.updated_at) > Date.parse(since)).map((row) => ({ ...row, updated_at: row.updated_at.replace('Z', '+00:00') }))),
+    push: remote.push,
+  };
+  const local = secrets({ 'pw:h-test': 'unchanged' });
+  let current = (await syncVault(vault([host]), transport, local, passphrase)).vault;
+  current = (await syncVault(current, transport, local, passphrase)).vault;
+  const idle = await syncVault(current, transport, local, passphrase);
+  assert.equal(idle.pushed, 0);
+  assert.equal(idle.pulled, 0);
+  const older = { ...host, id: 'h-older', updatedAt: '2025-12-01T00:00:00.000Z' };
+  await syncVault(vault([older]), remote, secrets({ 'pw:h-older': 'other' }), passphrase);
+  const received = await syncVault(idle.vault, transport, local, passphrase);
+  assert.ok(received.vault.hosts.some((entry) => entry.id === older.id));
+});
+
 test('authenticated encryption handles Unicode, randomizes ciphertext and rejects tampering/other hosts', async () => {
   const encrypted = await encryptPassword(host, 'пароль 🔑', passphrase);
   assert.equal(await decryptPassword(host, encrypted, passphrase), 'пароль 🔑');
@@ -205,4 +223,15 @@ test('key/snippet authentication failures and upload failures leave files, secre
   assert.equal(localSecrets.values.size, 0);
   assert.deepEqual(other, before);
   assert.throws(() => keyFileStorage('C:/test').path('../escape'), /Invalid key id/);
+});
+
+test('a local edit during network sync prevents stale remote secrets/files from being committed', async () => {
+  const remote = server();
+  await syncVault(vault([host]), remote, secrets({ 'pw:h-test': 'remote' }), passphrase);
+  const local = secrets({ 'pw:h-test': 'new-local-password' });
+  const source = vault();
+  const result = await syncVault(source, remote, local, passphrase, undefined, () => false);
+  assert.equal(result.superseded, true);
+  assert.equal(local.get('pw:h-test'), 'new-local-password');
+  assert.equal(result.vault, source);
 });

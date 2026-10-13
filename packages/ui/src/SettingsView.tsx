@@ -38,11 +38,15 @@ export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced }:
   };
   useEffect(() => {
     void refresh();
+    const stopSync = window.hopdock.sync.onStatus((next) => {
+      setStatus(next);
+      setSyncError(next.lastError ?? '');
+    });
     void window.hopdock.winscp.status().then(setWinSCP).catch((error) => notifyError(error, 'Load WinSCP integration'));
     const apply = (next: UpdateStatus) => setUpdate((previous) => (next.revision ?? 0) >= (previous.revision ?? 0) ? next : previous);
     const stop = window.hopdock.updater.onStatus(apply);
     void window.hopdock.updater.status().then(apply).catch((error) => setUpdate({ state: 'error', message: String(error) }));
-    return stop;
+    return () => { stop(); stopSync(); };
   }, []);
 
   const save = async () => {
@@ -66,7 +70,7 @@ export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced }:
     try {
       const r = await window.hopdock.sync.syncNow();
       await onSynced?.();
-      setMsg(`Synced: pushed ${r.pushed}, pulled ${r.pulled}.`);
+      setMsg(r.pushed || r.pulled ? `Sent ${r.pushed} changed items · Received ${r.pulled} changed items.` : 'Everything is synced. No changes.');
       await refresh();
     } catch (e) {
       setSyncError(String(e));
@@ -144,7 +148,7 @@ export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced }:
           </div>
           <div className="hd-row" style={{ justifyContent: 'flex-end' }}>
             <button className="hd-btn" type="button" disabled={busy || !status?.backendConfigured || !email.trim() || !password} onClick={() => void save()}>Save account</button>
-            <button className="hd-btn primary" type="button" disabled={busy || !status?.configured || !status?.passwordsConfigured} onClick={() => void syncNow()}>Sync now</button>
+            <button className="hd-btn primary" type="button" disabled={busy || status?.syncing || !status?.configured || !status?.passwordsConfigured} onClick={() => void syncNow()}>{status?.syncing ? 'Syncing…' : 'Sync now'}</button>
           </div>
         </div>
         <div className="hd-form" style={{ marginTop: 16 }}>
@@ -153,7 +157,8 @@ export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced }:
           <div className="hd-row" style={{ justifyContent: 'flex-end' }}><button className="hd-btn" type="button" disabled={busy || encryptionPassword.length < 12} onClick={() => void saveEncryptionPassword()}>Save encryption password</button></div>
         </div>
         <div style={{ fontSize: 12, color: 'var(--hd-muted)', marginTop: 8 }}>
-          Status: {status ? `${status.configured ? 'configured' : 'not configured'} · last sync ${status.lastSyncAt}` : '…'}
+          {status?.syncing ? 'Syncing changes…' : status?.configured && status.passwordsConfigured ? 'Automatic sync is on.' : 'Sync is not configured.'}
+          {status && Date.parse(status.lastSyncAt) > 0 && ` Last synced: ${new Date(status.lastSyncAt).toLocaleString()}.`}
           {msg && <div>{msg}</div>}
         </div>
         <ErrorNotice error={syncError || status?.lastError} context="Vault sync" onDismiss={() => { setSyncError(''); setStatus((previous) => previous ? { ...previous, lastError: null } : previous); }} />

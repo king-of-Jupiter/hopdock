@@ -77,7 +77,7 @@ export function App() {
       setKeys(v.keys);
       setSnippets(v.snippets);
       const s = await window.hopdock.sync.status();
-      setSyncLine(s.configured ? `sync: last ${s.lastSyncAt}` : 'sync: not configured');
+      setSyncLine(s.syncing ? 'syncing…' : s.lastError ? 'sync: needs attention' : s.configured && s.passwordsConfigured ? 'sync: automatic' : 'sync: not configured');
     } catch (error) {
       notifyError(error, 'Load library');
     }
@@ -85,6 +85,11 @@ export function App() {
 
   useEffect(() => {
     void reload();
+    const stopVault = window.hopdock.sync.onVaultUpdated(() => void reload());
+    const stopStatus = window.hopdock.sync.onStatus((s) => {
+      setSyncLine(s.syncing ? 'syncing…' : s.lastError ? 'sync: needs attention' : s.configured && s.passwordsConfigured ? 'sync: automatic' : 'sync: not configured');
+    });
+    return () => { stopVault(); stopStatus(); };
   }, []);
 
   const openTerminal = (h: Host) => {

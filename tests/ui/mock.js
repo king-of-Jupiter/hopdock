@@ -175,6 +175,8 @@
       remove: function () { return Promise.resolve(); },
     },
     sync: {
+      onStatus: function () { return function () {}; },
+      onVaultUpdated: function () { return function () {}; },
       status: function () { return Promise.resolve({ configured: false, backendConfigured: true, projectUrl: 'https://preview.supabase.co', passwordsConfigured: !!this.passwordsConfigured, lastSyncAt: 'never', lastError: null }); },
       saveCreds: function () { return Promise.resolve(); },
       setEncryptionPassword: function () { this.passwordsConfigured = true; return Promise.resolve(); },

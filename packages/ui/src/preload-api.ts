@@ -42,6 +42,7 @@ export interface TermiusImportResult {
 }
 
 export interface SyncStatus {
+  syncing?: boolean;
   configured: boolean;
   backendConfigured: boolean;
   projectUrl: string;
@@ -124,6 +125,8 @@ export interface HopdockApi {
     open(hostId: string): Promise<void>;
   };
   sync: {
+    onStatus(cb: (status: SyncStatus) => void): () => void;
+    onVaultUpdated(cb: () => void): () => void;
     status(): Promise<SyncStatus>;
     saveCreds(creds: SyncCredsInput): Promise<void>;
     setEncryptionPassword(password: string): Promise<void>;

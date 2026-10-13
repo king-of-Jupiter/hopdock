@@ -339,6 +339,10 @@ try {
     }, server.port);
     const wire = JSON.stringify([...syncServer.rows.values()]);
     for (const secret of ['local-test-password', 'sync-key-passphrase', 'PRIVATE KEY', 'synced-command']) assert.ok(!wire.includes(secret), 'Plaintext found on wire: ' + secret);
+    await page.evaluate((host) => window.hopdock.vault.saveHost({ name: 'Auto sync edited', host: host.host, port: host.port, username: host.username, auth: host.auth, tags: ['automatic'] }, host.id), source.host);
+    await expect.poll(() => syncServer.rows.get(source.host.id)?.data.name, { timeout: 10000 }).toBe('Auto sync edited');
+    const quiet = await page.evaluate(() => window.hopdock.sync.syncNow());
+    assert.deepEqual(quiet, { pushed: 0, pulled: 0 });
     const otherProfile = join(root, 'other-profile'); fs.mkdirSync(join(otherProfile, 'hopdock'), { recursive: true });
     fs.writeFileSync(join(otherProfile, 'hopdock/hopdock-vault.json'), JSON.stringify({ hosts: [], groups: [], keys: [], snippets: [], lastSyncAt: new Date(0).toISOString() }));
     const other = await electron.launch({ args: [resolve('tests/desktop/launch.cjs')], env: { ...process.env, HOPDOCK_TEST_PROFILE: otherProfile, HOPDOCK_TEST_SYNC_SERVER: syncServer.url }, timeout: 30000 });
@@ -348,8 +352,9 @@ try {
       for (const id of [source.host.id, source.keyHost.id]) await target.evaluate(async (id) => { await window.hopdock.ssh.connect({ hostId: id }); const result = await window.hopdock.ssh.exec(id, 'echo restored-auth'); if (result.stdout.trim() !== 'restored-auth') throw new Error('Restored auth failed'); await window.hopdock.ssh.close(id); }, id);
       const output = await target.evaluate(({ snippet, host }) => window.hopdock.snippets.run(snippet.id, host.id, {}), source);
       assert.equal(output.stdout.trim(), 'synced-command');
-      await target.evaluate(async ({ host, key, snippet, keyHost }) => { await window.hopdock.vault.deleteHost(host.id); await window.hopdock.vault.deleteHost(keyHost.id); await window.hopdock.keys.delete(key.id); await window.hopdock.snippets.remove(snippet.id); await window.hopdock.sync.syncNow(); }, source);
-      await page.evaluate(() => window.hopdock.sync.syncNow());
+      await target.evaluate(async ({ host, key, snippet, keyHost }) => { await window.hopdock.vault.deleteHost(host.id); await window.hopdock.vault.deleteHost(keyHost.id); await window.hopdock.keys.delete(key.id); await window.hopdock.snippets.remove(snippet.id); }, source);
+      await expect.poll(() => !!syncServer.rows.get(source.host.id)?.deleted_at, { timeout: 10000 }).toBe(true);
+      await expect.poll(async () => (await page.evaluate(() => window.hopdock.vault.get())).hosts.some((h) => h.id === source.host.id), { timeout: 25000 }).toBe(false);
       const updated = await page.evaluate(() => window.hopdock.vault.get());
       assert.ok(!updated.hosts.some((h) => h.id === source.host.id)); assert.ok(!updated.keys.some((k) => k.id === source.key.id)); assert.ok(!updated.snippets.some((s) => s.id === source.snippet.id));
     } finally { await other.close(); }

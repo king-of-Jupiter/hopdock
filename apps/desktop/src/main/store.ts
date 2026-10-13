@@ -12,6 +12,7 @@ export interface VaultFile {
   lastSyncAt: string;
   passwordSyncVersion?: 1;
   contentSyncVersion?: 1;
+  syncedVersions?: Record<string, string>;
   deletedHosts?: Host[];
   deletedKeys?: { id: string; vaultId: string; updatedAt: string }[];
   deletedSnippets?: { id: string; vaultId: string; updatedAt: string }[];
@@ -54,10 +55,16 @@ export function loadVault(): VaultFile {
   }
 }
 
-export function saveVault(vault: VaultFile): void {
+const vaultSavedListeners = new Set<() => void>();
+export function onVaultSaved(listener: () => void): () => void {
+  vaultSavedListeners.add(listener);
+  return () => vaultSavedListeners.delete(listener);
+}
+export function saveVault(vault: VaultFile, notify = true): void {
   const path = join(userDir(), FILE), temporary = `${path}.${randomUUID()}.tmp`;
   try { writeFileSync(temporary, JSON.stringify(vault, null, 2), { mode: 0o600 }); renameSync(temporary, path); }
   finally { rmSync(temporary, { force: true }); }
+  if (notify) for (const listener of vaultSavedListeners) listener();
 }
 
 function secretsPath(): string {

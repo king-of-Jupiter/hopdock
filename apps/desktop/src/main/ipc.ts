@@ -1,6 +1,7 @@
 import { handleIpc } from './handle-ipc';
 import { randomUUID } from 'node:crypto';
-import { BrowserWindow, dialog } from 'electron';
+import { app, BrowserWindow, dialog } from 'electron';
+import { explainError } from '@hopdock/core';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { planTermiusImport } from './termius-import';
 import { readTermiusProfile } from './termius-reader';
@@ -10,7 +11,8 @@ import { SessionManager } from '@hopdock/ssh';
 import type { ConnectOpts } from '@hopdock/ssh';
 import { fingerprint, generateKeyFile, publicKeyFromPrivate } from '@hopdock/ssh';
 import { SyncEngine } from '@hopdock/sync';
-import { deleteSecret, getSecret, hasSecret, keysDir, loadVault, saveVault, setSecret } from './store';
+import { deleteSecret, getSecret, hasSecret, keysDir, loadVault, saveVault, setSecret, onVaultSaved } from './store';
+import { AutoSync } from './auto-sync';
 import type { SaveHostInput, SyncCredsInput } from '@hopdock/ui';
 import { syncVault } from './sync-vault';
 import { keyFileStorage } from './key-files';
@@ -25,16 +27,42 @@ let lastSyncError: string | null = null;
 let win: BrowserWindow | null = null;
 let syncBusy = false;
 let pendingKeyWrites = 0;
+let vaultRevision = 0;
+const automaticSync = new AutoSync({
+  ready: () => {
+    try { return !!(supabaseUrl && supabasePublishableKey && getSecret('sync:email') && getSecret('sync:pass') && getSecret('sync:encryptionPassword')) && pendingKeyWrites === 0; }
+    catch { return false; }
+  },
+  run: performSync,
+  onError: () => publishSyncStatus(),
+});
+function syncStatus() {
+  return {
+    configured: !!(supabaseUrl && supabasePublishableKey && getSecret('sync:email') && getSecret('sync:pass')),
+    backendConfigured: !!(supabaseUrl && supabasePublishableKey), projectUrl: supabaseUrl,
+    lastSyncAt: vault().lastSyncAt, lastError: lastSyncError, syncing: syncBusy,
+    passwordsConfigured: !!getSecret('sync:encryptionPassword'),
+  };
+}
+function publishSyncStatus() {
+  try {
+    if (win && !win.isDestroyed()) win.webContents.send('sync:statusChanged', syncStatus());
+  } catch { /* A corrupt vault is reported by the normal library/error flow. */ }
+}
+onVaultSaved(() => { vaultRevision++; automaticSync.schedule(); });
+const syncPoll = setInterval(() => automaticSync.schedule(), 15000);
+syncPoll.unref();
+app.on('will-quit', () => { clearInterval(syncPoll); automaticSync.dispose(); });
 
 async function mutateKeys<T>(operation: () => Promise<T>): Promise<T> {
   requireSyncIdle();
   pendingKeyWrites++;
   try { return await operation(); }
-  finally { pendingKeyWrites--; }
+  finally { pendingKeyWrites--; automaticSync.schedule(); }
 }
 
-function requireSyncIdle(): void {
-  if (syncBusy) throw new Error('Sync is in progress. Try again when it finishes.');
+function requireSyncIdle(strict = false): void {
+  if (strict && syncBusy) throw new Error('Sync is in progress. Try again when it finishes.');
 }
 
 export function setWindow(w: BrowserWindow): void {
@@ -174,7 +202,7 @@ export function registerIpc(): void {
       return saved;
     }
     const host = {
-      id: `h-${Date.now()}`,
+      id: `h-${randomUUID()}`,
       vaultId: 'v-personal',
       groupId: input.groupId ?? null,
       name: input.name,
@@ -428,33 +456,29 @@ export function registerIpc(): void {
     saveVault(v);
   });
 
-  handleIpc('sync:status', () => ({
-    configured: !!(supabaseUrl && supabasePublishableKey && getSecret('sync:email') && getSecret('sync:pass')),
-    backendConfigured: !!(supabaseUrl && supabasePublishableKey),
-    projectUrl: supabaseUrl,
-    lastSyncAt: vault().lastSyncAt,
-    lastError: lastSyncError,
-    passwordsConfigured: !!getSecret('sync:encryptionPassword'),
-  }));
+  handleIpc('sync:status', syncStatus);
 
   handleIpc('sync:setEncryptionPassword', (_e, passphrase: string) => {
-    requireSyncIdle();
+    requireSyncIdle(true);
     if (typeof passphrase !== 'string' || passphrase.length < 12) throw new Error('Use at least 12 characters for the sync encryption password.');
     const previous = getSecret('sync:encryptionPassword');
     if (previous && previous !== passphrase && vault().passwordSyncVersion === 1) {
       throw new Error('The encryption password is already in use. Keep the same password on all devices.');
     }
     setSecret('sync:encryptionPassword', passphrase);
+    automaticSync.schedule();
+    publishSyncStatus();
   });
 
   handleIpc('sync:saveCreds', (_e, creds: SyncCredsInput) => {
-    requireSyncIdle();
+    requireSyncIdle(true);
     if (!supabaseUrl || !supabasePublishableKey) throw new Error('This build has no Supabase configuration.');
     if (!creds.email?.trim() || !creds.password) throw new Error('Enter your account email and password.');
     if (getSecret('sync:url') !== supabaseUrl || getSecret('sync:email') !== creds.email) {
       const v = vault();
       delete v.passwordSyncVersion;
       delete v.contentSyncVersion;
+      delete v.syncedVersions;
       v.lastSyncAt = new Date(0).toISOString();
       saveVault(v);
     }
@@ -463,38 +487,51 @@ export function registerIpc(): void {
     setSecret('sync:email', creds.email);
     setSecret('sync:pass', creds.password);
     sync.configure({ url: supabaseUrl, anonKey: supabasePublishableKey, email: creds.email, password: creds.password });
+    automaticSync.schedule();
+    publishSyncStatus();
   });
 
-  handleIpc('sync:now', async () => {
-    requireSyncIdle();
-    if (pendingKeyWrites) throw new Error('Wait for key generation or import to finish before syncing.');
-    if (!sync.configured) {
-      const email = getSecret('sync:email');
-      const password = getSecret('sync:pass');
-      if (!supabaseUrl || !supabasePublishableKey) throw new Error('This build has no Supabase configuration.');
-      if (!email || !password) throw new Error('Sign in to sync in Settings first.');
-      if (getSecret('sync:url') !== supabaseUrl) {
-        const v = vault();
-        delete v.passwordSyncVersion;
-        delete v.contentSyncVersion;
-        v.lastSyncAt = new Date(0).toISOString();
-        saveVault(v);
-        setSecret('sync:url', supabaseUrl);
-      }
-      sync.configure({ url: supabaseUrl, anonKey: supabasePublishableKey, email, password });
+  handleIpc('sync:now', () => automaticSync.flush());
+  automaticSync.schedule();
+}
+
+async function performSync() {
+  if (pendingKeyWrites) throw new Error('Wait for key generation or import to finish before syncing.');
+  if (!sync.configured) {
+    const email = getSecret('sync:email');
+    const password = getSecret('sync:pass');
+    if (!supabaseUrl || !supabasePublishableKey) throw new Error('This build has no Supabase configuration.');
+    if (!email || !password) throw new Error('Sign in to sync in Settings first.');
+    if (getSecret('sync:url') !== supabaseUrl) {
+      const v = vault();
+      delete v.passwordSyncVersion;
+      delete v.contentSyncVersion;
+      delete v.syncedVersions;
+      v.lastSyncAt = new Date(0).toISOString();
+      saveVault(v);
+      setSecret('sync:url', supabaseUrl);
     }
-    const v = vault();
-    lastSyncError = null;
-    syncBusy = true;
-    try {
-      const result = await syncVault(v, sync, { get: getSecret, set: setSecret, delete: deleteSecret }, getSecret('sync:encryptionPassword') ?? '', keyFileStorage(keysDir()));
-      saveVault(result.vault);
-      return { pushed: result.pushed, pulled: result.pulled };
-    } catch (err) {
-      lastSyncError = String(err);
-      throw err;
-    } finally {
-      syncBusy = false;
+    sync.configure({ url: supabaseUrl, anonKey: supabasePublishableKey, email, password });
+  }
+  const v = vault();
+  const revision = vaultRevision;
+  lastSyncError = null;
+  syncBusy = true;
+  publishSyncStatus();
+  try {
+    const result = await syncVault(v, sync, { get: getSecret, set: setSecret, delete: deleteSecret }, getSecret('sync:encryptionPassword') ?? '', keyFileStorage(keysDir()), () => revision === vaultRevision && pendingKeyWrites === 0);
+    if (result.superseded) automaticSync.schedule(0);
+    else {
+      saveVault(result.vault, false);
+      if (win && !win.isDestroyed()) win.webContents.send('vault:updated');
     }
-  });
+    return { pushed: result.pushed, pulled: result.pulled };
+  } catch (err) {
+    const issue = explainError(err, 'sync:now');
+    lastSyncError = `HOPDOCK_ERROR:${JSON.stringify(issue)}`;
+    throw err;
+  } finally {
+    syncBusy = false;
+    publishSyncStatus();
+  }
 }
