@@ -51,6 +51,12 @@ export interface SyncStatus {
   lastError: string | null;
 }
 
+export interface AccountStatus {
+  signedIn: boolean;
+  email: string | null;
+  backendConfigured: boolean;
+}
+
 export interface UpdateStatus {
   state: 'idle' | 'checking' | 'available' | 'downloading' | 'downloaded' | 'up-to-date' | 'error';
   version?: string;
@@ -123,6 +129,13 @@ export interface HopdockApi {
     status(): Promise<{ supported: boolean; path: string | null }>;
     configure(path: string): Promise<void>;
     open(hostId: string): Promise<void>;
+  };
+  auth: {
+    status(): Promise<AccountStatus>;
+    signIn(creds: SyncCredsInput): Promise<AccountStatus>;
+    signUp(creds: SyncCredsInput): Promise<{ confirmationRequired: boolean; account: AccountStatus }>;
+    signOut(): Promise<AccountStatus>;
+    onStatus(cb: (status: AccountStatus) => void): () => void;
   };
   sync: {
     onStatus(cb: (status: SyncStatus) => void): () => void;

@@ -1,4 +1,5 @@
 import { Icons } from './icons';
+import { IconUserCircle } from '@tabler/icons-react';
 
 export type RailView = 'hosts' | 'keys' | 'snippets' | 'settings';
 
@@ -7,6 +8,8 @@ interface Props {
   onView: (v: RailView) => void;
   theme: 'dark' | 'light';
   onTheme: (theme: 'dark' | 'light') => void;
+  accountEmail?: string | null;
+  onAccount?: () => void;
 }
 
 const ITEMS: Array<{ id: RailView | 'portforward' | 'known' | 'history'; label: string; icon: () => React.JSX.Element; soon?: boolean }> = [
@@ -18,7 +21,7 @@ const ITEMS: Array<{ id: RailView | 'portforward' | 'known' | 'history'; label: 
   { id: 'history', label: 'History', icon: Icons.clock, soon: true },
 ];
 
-export function RailNav({ view, onView, theme, onTheme }: Props) {
+export function RailNav({ view, onView, theme, onTheme, accountEmail, onAccount }: Props) {
   return (
     <nav className="hd-rail" aria-label="Sections">
       <div className="hd-brand"><img className="hd-brand-mark" src={new URL('./assets/hopdock-mark.svg', import.meta.url).href} alt="" aria-hidden="true" /><span>Hopdock</span></div>
@@ -41,6 +44,7 @@ export function RailNav({ view, onView, theme, onTheme }: Props) {
         );
       })}
       <div className="hd-rail-foot">
+        {onAccount && <button className="hd-rail-item hd-account-nav" type="button" onClick={onAccount} title={accountEmail ?? 'Sign in'}><span className="ic"><IconUserCircle size={20} stroke={1.5} /></span><span><strong>{accountEmail ? 'Account' : 'Sign in'}</strong><small>{accountEmail ?? 'Sync your library'}</small></span></button>}
         <button
           type="button"
           className={'hd-rail-item' + (view === 'settings' ? ' active' : '')}

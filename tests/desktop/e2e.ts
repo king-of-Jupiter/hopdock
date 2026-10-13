@@ -42,6 +42,15 @@ const selectNativeFiles = async (paths: string[] | null) => app.evaluate(({ dial
 const confirmDelete = async () => { await page.getByRole('dialog').getByRole('button', { name: 'Delete', exact: true }).click(); };
 try {
   await page.waitForLoadState();
+  await step('Welcome sign-in screen, confirmation flow and local/offline access', async () => {
+    await expect(page.getByRole('heading', { name: 'Sign in to Hopdock', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Create account', exact: true }).click();
+    await page.getByLabel('Email', { exact: true }).fill('confirm@example.invalid');
+    await page.getByLabel('Password', { exact: true }).fill('test-new-account-password');
+    await page.getByRole('button', { name: 'Create account', exact: true }).click();
+    await expect(page.getByText('Check your email to confirm your account, then sign in here.', { exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'Continue offline', exact: true }).click();
+  });
   await step('Native preload, sandbox and isolated empty vault', async () => {
     assert.equal(await page.evaluate(() => typeof window.hopdock), 'object');
     assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.webContents.getLastWebPreferences().sandbox), true);
@@ -337,6 +346,11 @@ try {
       await window.hopdock.sync.syncNow();
       return { host, key, keyHost, snippet };
     }, server.port);
+    const account = await page.evaluate(() => window.hopdock.auth.status());
+    assert.equal(account.signedIn, true);
+    assert.equal(account.email, 'test@example.invalid');
+    const savedSession = JSON.parse(fs.readFileSync(join(profile, 'hopdock/hopdock-secrets.json'), 'utf8'));
+    assert.ok(savedSession['sync:session']); assert.equal(savedSession['sync:pass'], undefined);
     const wire = JSON.stringify([...syncServer.rows.values()]);
     for (const secret of ['local-test-password', 'sync-key-passphrase', 'PRIVATE KEY', 'synced-command']) assert.ok(!wire.includes(secret), 'Plaintext found on wire: ' + secret);
     await page.evaluate((host) => window.hopdock.vault.saveHost({ name: 'Auto sync edited', host: host.host, port: host.port, username: host.username, auth: host.auth, tags: ['automatic'] }, host.id), source.host);
@@ -358,6 +372,41 @@ try {
       const updated = await page.evaluate(() => window.hopdock.vault.get());
       assert.ok(!updated.hosts.some((h) => h.id === source.host.id)); assert.ok(!updated.keys.some((k) => k.id === source.key.id)); assert.ok(!updated.snippets.some((s) => s.id === source.snippet.id));
     } finally { await other.close(); }
+    const signInsBeforeRestart = syncServer.metrics.signIns;
+    const refreshesBeforeRestart = syncServer.metrics.refreshes;
+    const resumed = await electron.launch({ args: [resolve('tests/desktop/launch.cjs')], env: { ...process.env, HOPDOCK_TEST_PROFILE: otherProfile, HOPDOCK_TEST_SYNC_SERVER: syncServer.url, HOPDOCK_TEST_EXPIRE_SESSION: '1' }, timeout: 30000 });
+    try {
+      const resumedPage = await resumed.firstWindow(); await resumedPage.waitForLoadState();
+      assert.equal((await resumedPage.evaluate(() => window.hopdock.auth.status())).signedIn, true);
+      await resumedPage.evaluate(() => window.hopdock.sync.syncNow());
+      assert.equal(syncServer.metrics.signIns, signInsBeforeRestart, 'A restored session must not ask for the account password again');
+      assert.ok(syncServer.metrics.refreshes > refreshesBeforeRestart, 'An expired session must refresh from encrypted storage');
+    } finally { await resumed.close(); }
+  });
+  await step('Account drawer: wrong password, sign-out preserves data, real login and persisted session', async () => {
+    await page.getByRole('button', { name: /^Account/, exact: false }).first().click();
+    await expect(page.getByRole('dialog', { name: 'Your account', exact: true })).toBeVisible();
+    const before = await page.evaluate(() => window.hopdock.vault.get());
+    await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+    await page.getByRole('dialog', { name: 'Sign out on this device?', exact: true }).getByRole('button', { name: 'Sign out', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    assert.equal((await page.evaluate(() => window.hopdock.auth.status())).signedIn, false);
+    assert.deepEqual((await page.evaluate(() => window.hopdock.vault.get())).hosts, before.hosts);
+    await page.locator('.hd-account-nav').click();
+    await page.getByLabel('Email', { exact: true }).fill('test@example.invalid');
+    await page.getByLabel('Password', { exact: true }).fill('wrong');
+    await page.getByRole('dialog', { name: 'Sign in', exact: true }).getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page.getByText('Sync sign-in failed', { exact: true })).toBeVisible();
+    assert.equal((await page.evaluate(() => window.hopdock.auth.status())).signedIn, false);
+    await page.getByLabel('Password', { exact: true }).fill('test-account-password');
+    await page.getByRole('button', { name: 'Show account password', exact: true }).click();
+    await expect(page.getByLabel('Password', { exact: true })).toHaveAttribute('type', 'text');
+    await page.getByRole('dialog', { name: 'Sign in', exact: true }).getByRole('button', { name: 'Sign in', exact: true }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await page.reload();
+    assert.equal((await page.evaluate(() => window.hopdock.auth.status())).signedIn, true);
+    const otherAccount = await page.evaluate(async () => { try { await window.hopdock.auth.signIn({ email: 'another@example.invalid', password: 'test-password' }); return ''; } catch (error) { return String(error); } });
+    assert.match(otherAccount, /ACCOUNT_LIBRARY/);
   });
   await step('Corrupt local vault returns a recoverable error without replacing saved data', async () => {
     const path = join(profile, 'hopdock/hopdock-vault.json'); const saved = fs.readFileSync(path, 'utf8');

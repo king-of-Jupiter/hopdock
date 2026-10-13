@@ -1,12 +1,10 @@
 import { useEffect, useState } from 'react';
-import type { SyncStatus, UpdateStatus, TermiusImportResult } from './preload-api';
+import type { SyncStatus, UpdateStatus, TermiusImportResult, AccountStatus } from './preload-api';
 import { pickFiles } from './FilePicker';
 import { ErrorNotice, notifyError } from './ErrorNotice';
 import { IconDownload } from '@tabler/icons-react';
 
-export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced }: { hideGroupedHosts: boolean; onHideGroupedHosts: (value: boolean) => void; onSynced?: () => Promise<void> }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced, account, onAccount }: { hideGroupedHosts: boolean; onHideGroupedHosts: (value: boolean) => void; onSynced?: () => Promise<void>; account?: AccountStatus; onAccount?: () => void }) {
   const [encryptionPassword, setEncryptionPassword] = useState('');
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [update, setUpdate] = useState<UpdateStatus>({ state: 'idle' });
@@ -48,21 +46,6 @@ export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced }:
     void window.hopdock.updater.status().then(apply).catch((error) => setUpdate({ state: 'error', message: String(error) }));
     return () => { stop(); stopSync(); };
   }, []);
-
-  const save = async () => {
-    setBusy(true);
-    setMsg(''); setSyncError('');
-    try {
-      await window.hopdock.sync.saveCreds({ email: email.trim(), password });
-      setPassword('');
-      setMsg('Credentials saved to OS keychain.');
-      await refresh();
-    } catch (e) {
-      setSyncError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const syncNow = async () => {
     setBusy(true);
@@ -138,24 +121,19 @@ export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced }:
         </div>
         {update.checkedAt && <p className="hd-dialog-note">Last checked: {new Date(update.checkedAt).toLocaleString()}</p>}
       </div>
-      <div className="hd-sec">Vault sync (Supabase)</div>
+      <div className="hd-sec">Cloud sync</div>
       <div className="hd-card" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'stretch' }}>
-        <div className="hd-form">
-          {!status?.backendConfigured && <div style={{ fontSize: 12, color: 'var(--hd-muted)' }}>Sync is unavailable in this build.</div>}
-          <div className="hd-row">
-            <label>Email<input className="hd-input" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-            <label>Account password<input className="hd-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
-          </div>
-          <div className="hd-row" style={{ justifyContent: 'flex-end' }}>
-            <button className="hd-btn" type="button" disabled={busy || !status?.backendConfigured || !email.trim() || !password} onClick={() => void save()}>Save account</button>
-            <button className="hd-btn primary" type="button" disabled={busy || status?.syncing || !status?.configured || !status?.passwordsConfigured} onClick={() => void syncNow()}>{status?.syncing ? 'Syncing…' : 'Sync now'}</button>
-          </div>
+        <div className="hd-settings-account">
+          <div><strong>{account?.signedIn ? account.email : 'Sign in to sync your library'}</strong><p className="hd-dialog-note">{account?.signedIn ? 'Hosts, keys and snippets sync automatically.' : 'Your local library works without an account.'}</p></div>
+          <button className="hd-btn" type="button" onClick={onAccount}>{account?.signedIn ? 'Account' : 'Sign in'}</button>
         </div>
+        {!status?.backendConfigured && <p className="hd-dialog-note">Cloud sync is unavailable in this build.</p>}
         <div className="hd-form" style={{ marginTop: 16 }}>
           <label>Sync encryption password<input className="hd-input" type="password" autoComplete="off" minLength={12} value={encryptionPassword} onChange={(e) => setEncryptionPassword(e.target.value)} placeholder={status?.passwordsConfigured ? 'Saved on this device' : 'At least 12 characters'} /></label>
           <div style={{ fontSize: 12, color: 'var(--hd-muted)' }}>Use the same encryption password on every device. It encrypts host passwords, private keys and snippets before upload. Keep it safe: it cannot be recovered or changed after the first successful sync.</div>
           <div className="hd-row" style={{ justifyContent: 'flex-end' }}><button className="hd-btn" type="button" disabled={busy || encryptionPassword.length < 12} onClick={() => void saveEncryptionPassword()}>Save encryption password</button></div>
         </div>
+        <button className="hd-btn" type="button" disabled={busy || status?.syncing || !status?.configured || !status?.passwordsConfigured} onClick={() => void syncNow()}>{status?.syncing ? 'Syncing…' : 'Sync now'}</button>
         <div style={{ fontSize: 12, color: 'var(--hd-muted)', marginTop: 8 }}>
           {status?.syncing ? 'Syncing changes…' : status?.configured && status.passwordsConfigured ? 'Automatic sync is on.' : 'Sync is not configured.'}
           {status && Date.parse(status.lastSyncAt) > 0 && ` Last synced: ${new Date(status.lastSyncAt).toLocaleString()}.`}

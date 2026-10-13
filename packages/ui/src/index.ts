@@ -1,4 +1,5 @@
 export { AppShell } from './AppShell';
+export { AuthScreen, AccountDrawer } from './AccountView';
 export { RailNav } from './RailNav';
 export type { RailView } from './RailNav';
 export { TopTabs } from './TopTabs';

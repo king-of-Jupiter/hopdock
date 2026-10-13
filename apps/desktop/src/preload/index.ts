@@ -72,6 +72,13 @@ const api: HopdockApi = {
     configure: (path) => invoke('winscp:configure', path),
     open: (hostId) => invoke('winscp:open', hostId),
   },
+  auth: {
+    status: () => invoke('auth:status'),
+    signIn: (creds) => invoke('auth:signIn', creds),
+    signUp: (creds) => invoke('auth:signUp', creds),
+    signOut: () => invoke('auth:signOut'),
+    onStatus: (cb) => on('auth:statusChanged', cb),
+  },
   sync: {
     onStatus: (cb) => on('sync:statusChanged', cb),
     onVaultUpdated: (cb) => on('vault:updated', cb),

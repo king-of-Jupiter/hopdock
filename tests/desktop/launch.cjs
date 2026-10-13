@@ -10,6 +10,17 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('password-store', 'basic');
   app.whenReady().then(() => safeStorage.setUsePlainTextEncryption(true));
 }
+if (process.env.HOPDOCK_TEST_EXPIRE_SESSION === '1') {
+  app.whenReady().then(() => {
+    const fs = require('node:fs');
+    const path = resolve(process.env.HOPDOCK_TEST_PROFILE, 'hopdock/hopdock-secrets.json');
+    const stored = JSON.parse(fs.readFileSync(path, 'utf8'));
+    const session = JSON.parse(safeStorage.decryptString(Buffer.from(stored['sync:session'], 'base64')));
+    session.expires_at = 1;
+    stored['sync:session'] = safeStorage.encryptString(JSON.stringify(session)).toString('base64');
+    fs.writeFileSync(path, JSON.stringify(stored));
+  });
+}
 // Only this test entry point redirects the real SDK to an in-process fixture.
 if (process.env.HOPDOCK_TEST_SYNC_SERVER) {
   const originalFetch = globalThis.fetch;

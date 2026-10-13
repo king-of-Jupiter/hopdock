@@ -10,7 +10,7 @@ import { basename, join, resolve } from 'path';
 import { SessionManager } from '@hopdock/ssh';
 import type { ConnectOpts } from '@hopdock/ssh';
 import { fingerprint, generateKeyFile, publicKeyFromPrivate } from '@hopdock/ssh';
-import { SyncEngine } from '@hopdock/sync';
+import { SyncEngine, authenticateAccount } from '@hopdock/sync';
 import { deleteSecret, getSecret, hasSecret, keysDir, loadVault, saveVault, setSecret, onVaultSaved } from './store';
 import { AutoSync } from './auto-sync';
 import type { SaveHostInput, SyncCredsInput } from '@hopdock/ui';
@@ -28,9 +28,63 @@ let win: BrowserWindow | null = null;
 let syncBusy = false;
 let pendingKeyWrites = 0;
 let vaultRevision = 0;
+let authBusy = false;
+const sessionStorage = {
+  getItem: (key: string) => getSecret(key === 'hopdock-auth' ? 'sync:session' : `auth:${key}`),
+  setItem: (key: string, value: string) => {
+    setSecret(key === 'hopdock-auth' ? 'sync:session' : `auth:${key}`, value);
+    if (key === 'hopdock-auth') { publishAccountStatus(); publishSyncStatus(); }
+  },
+  removeItem: (key: string) => {
+    deleteSecret(key === 'hopdock-auth' ? 'sync:session' : `auth:${key}`);
+    if (key === 'hopdock-auth') { publishAccountStatus(); publishSyncStatus(); }
+  },
+};
+function accountConfigured() {
+  return !!(supabaseUrl && supabasePublishableKey && getSecret('sync:email') && (getSecret('sync:session') || getSecret('sync:pass')));
+}
+function accountStatus() {
+  return { signedIn: !!(getSecret('sync:session') && getSecret('sync:email')),
+    email: getSecret('sync:email'), backendConfigured: !!(supabaseUrl && supabasePublishableKey) };
+}
+function publishAccountStatus() {
+  if (win && !win.isDestroyed()) win.webContents.send('auth:statusChanged', accountStatus());
+}
+async function signInAccount(creds: SyncCredsInput, create = false) {
+  if (authBusy) throw new Error('Wait for sign-in to finish.');
+  if (!supabaseUrl || !supabasePublishableKey) throw new Error('This build has no Supabase configuration.');
+  const email = creds.email?.trim().toLowerCase();
+  if (!email || !creds.password) throw new Error('Enter your account email and password.');
+  const owner = getSecret('sync:ownerEmail') || getSecret('sync:email');
+  const local = vault();
+  if (owner && owner.toLowerCase() !== email && (local.hosts.length || local.keys.length || local.snippets.length || local.groups.length)) {
+    throw new Error('This local library belongs to another sync account. Sign in to the original account.');
+  }
+  requireSyncIdle(true);
+  authBusy = true;
+  try {
+    const { session } = await authenticateAccount({ url: supabaseUrl, anonKey: supabasePublishableKey, email, password: creds.password }, create);
+    if (!session) {
+      if (create) return { confirmationRequired: true, account: accountStatus() };
+      throw new Error('Invalid login credentials');
+    }
+    if (getSecret('sync:url') !== supabaseUrl || getSecret('sync:ownerEmail')?.toLowerCase() !== email) {
+      const v = vault();
+      delete v.passwordSyncVersion; delete v.contentSyncVersion; delete v.syncedVersions;
+      v.lastSyncAt = new Date(0).toISOString();
+      saveVault(v);
+    }
+    setSecret('sync:session', JSON.stringify(session));
+    setSecret('sync:email', email); setSecret('sync:ownerEmail', email); setSecret('sync:url', supabaseUrl);
+    deleteSecret('sync:pass'); deleteSecret('sync:key');
+    sync.configure({ url: supabaseUrl, anonKey: supabasePublishableKey, email, password: '' }, sessionStorage);
+    publishAccountStatus(); publishSyncStatus(); automaticSync.schedule();
+    return { confirmationRequired: false, account: accountStatus() };
+  } finally { authBusy = false; }
+}
 const automaticSync = new AutoSync({
   ready: () => {
-    try { return !!(supabaseUrl && supabasePublishableKey && getSecret('sync:email') && getSecret('sync:pass') && getSecret('sync:encryptionPassword')) && pendingKeyWrites === 0; }
+    try { return accountConfigured() && !!getSecret('sync:encryptionPassword') && pendingKeyWrites === 0 && !authBusy; }
     catch { return false; }
   },
   run: performSync,
@@ -38,7 +92,7 @@ const automaticSync = new AutoSync({
 });
 function syncStatus() {
   return {
-    configured: !!(supabaseUrl && supabasePublishableKey && getSecret('sync:email') && getSecret('sync:pass')),
+    configured: accountConfigured(),
     backendConfigured: !!(supabaseUrl && supabasePublishableKey), projectUrl: supabaseUrl,
     lastSyncAt: vault().lastSyncAt, lastError: lastSyncError, syncing: syncBusy,
     passwordsConfigured: !!getSecret('sync:encryptionPassword'),
@@ -470,38 +524,37 @@ export function registerIpc(): void {
     publishSyncStatus();
   });
 
-  handleIpc('sync:saveCreds', (_e, creds: SyncCredsInput) => {
-    requireSyncIdle(true);
-    if (!supabaseUrl || !supabasePublishableKey) throw new Error('This build has no Supabase configuration.');
-    if (!creds.email?.trim() || !creds.password) throw new Error('Enter your account email and password.');
-    if (getSecret('sync:url') !== supabaseUrl || getSecret('sync:email') !== creds.email) {
-      const v = vault();
-      delete v.passwordSyncVersion;
-      delete v.contentSyncVersion;
-      delete v.syncedVersions;
-      v.lastSyncAt = new Date(0).toISOString();
-      saveVault(v);
-    }
-    setSecret('sync:url', supabaseUrl);
-    deleteSecret('sync:key');
-    setSecret('sync:email', creds.email);
-    setSecret('sync:pass', creds.password);
-    sync.configure({ url: supabaseUrl, anonKey: supabasePublishableKey, email: creds.email, password: creds.password });
-    automaticSync.schedule();
-    publishSyncStatus();
+  handleIpc('auth:status', accountStatus);
+  handleIpc('auth:signIn', async (_e, creds: SyncCredsInput) => (await signInAccount(creds)).account);
+  handleIpc('auth:signUp', (_e, creds: SyncCredsInput) => signInAccount(creds, true));
+  handleIpc('auth:signOut', async () => {
+    if (authBusy) throw new Error('Wait for sign-in to finish.');
+    authBusy = true;
+    try {
+      if (syncBusy) await automaticSync.flush().catch(() => {});
+      try { await sync.signOut(); } catch { /* Local sign-out also works offline. */ }
+      sync.configure(null); automaticSync.dispose();
+      deleteSecret('sync:session'); deleteSecret('sync:email'); deleteSecret('sync:pass');
+      lastSyncError = null;
+      publishAccountStatus(); publishSyncStatus();
+      return accountStatus();
+    } finally { authBusy = false; }
   });
+  // Compatibility for older IPC callers; this now validates a real sign-in.
+  handleIpc('sync:saveCreds', async (_e, creds: SyncCredsInput) => { await signInAccount(creds); });
 
   handleIpc('sync:now', () => automaticSync.flush());
   automaticSync.schedule();
 }
 
 async function performSync() {
+  if (authBusy) throw new Error('Wait for sign-in to finish.');
   if (pendingKeyWrites) throw new Error('Wait for key generation or import to finish before syncing.');
   if (!sync.configured) {
     const email = getSecret('sync:email');
-    const password = getSecret('sync:pass');
+    const password = getSecret('sync:pass') ?? '';
     if (!supabaseUrl || !supabasePublishableKey) throw new Error('This build has no Supabase configuration.');
-    if (!email || !password) throw new Error('Sign in to sync in Settings first.');
+    if (!email || (!password && !getSecret('sync:session'))) throw new Error('Sign in to sync first.');
     if (getSecret('sync:url') !== supabaseUrl) {
       const v = vault();
       delete v.passwordSyncVersion;
@@ -511,7 +564,7 @@ async function performSync() {
       saveVault(v);
       setSecret('sync:url', supabaseUrl);
     }
-    sync.configure({ url: supabaseUrl, anonKey: supabasePublishableKey, email, password });
+    sync.configure({ url: supabaseUrl, anonKey: supabasePublishableKey, email, password }, sessionStorage);
   }
   const v = vault();
   const revision = vaultRevision;
@@ -523,6 +576,10 @@ async function performSync() {
     if (result.superseded) automaticSync.schedule(0);
     else {
       saveVault(result.vault, false);
+      if (getSecret('sync:session')) {
+        if (getSecret('sync:email')) setSecret('sync:ownerEmail', getSecret('sync:email')!);
+        deleteSecret('sync:pass'); publishAccountStatus();
+      }
       if (win && !win.isDestroyed()) win.webContents.send('vault:updated');
     }
     return { pushed: result.pushed, pulled: result.pulled };

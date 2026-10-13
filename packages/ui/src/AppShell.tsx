@@ -18,10 +18,12 @@ interface Props {
   status: ReactNode;
   children: ReactNode;
   snippetsOpen: boolean;
+  accountEmail?: string | null;
+  onAccount?: () => void;
   onToggleSnippets: () => void;
 }
 
-export function AppShell({ theme, onTheme, railView, onRailView, tabs, activeTab, onPickTab, onCloseSession, status, children, snippetsOpen, onToggleSnippets }: Props) {
+export function AppShell({ theme, onTheme, railView, onRailView, tabs, activeTab, onPickTab, onCloseSession, status, children, snippetsOpen, onToggleSnippets, accountEmail, onAccount }: Props) {
   const terminal = tabs[activeTab]?.kind === 'session';
   const [navigation, setNavigation] = useState(false);
   const main = useRef<HTMLElement>(null);
@@ -35,7 +37,7 @@ export function AppShell({ theme, onTheme, railView, onRailView, tabs, activeTab
   useEffect(() => { if (!terminal) setNavigation(false); }, [terminal]);
   return (
     <div className={'hd-app' + (terminal ? ' hd-session-layout' : '') + (navigation ? ' hd-navigation-open' : '')} data-theme={theme}>
-      <RailNav view={railView} onView={onRailView} theme={theme} onTheme={onTheme} />
+      <RailNav view={railView} onView={onRailView} theme={theme} onTheme={onTheme} accountEmail={accountEmail} onAccount={onAccount} />
       {terminal && navigation && <button className="hd-navigation-backdrop" aria-label="Close navigation" onClick={() => setNavigation(false)} />}
       <TopTabs tabs={tabs} active={activeTab} onPick={onPickTab} onCloseSession={onCloseSession} leading={terminal && <button className="hd-icon-btn" type="button" aria-label="Toggle navigation" aria-expanded={navigation} onClick={() => setNavigation((value) => !value)}><IconMenu2 size={20} stroke={1.6} /></button>} trailing={terminal && <button className="hd-icon-btn hd-snippets-toggle" type="button" aria-label="Toggle snippets" title="Snippets" aria-expanded={snippetsOpen} onClick={onToggleSnippets}><IconBraces size={18} stroke={1.6} /></button>} />
       <main ref={main} className="hd-main">{children}</main>

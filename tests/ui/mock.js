@@ -174,6 +174,18 @@
       save: function (input, id) { return Promise.resolve({ id: id || 's-shot', vaultId: 'v-personal', name: input.name, folder: input.folder, script: input.script, vars: [], updatedAt: '' }); },
       remove: function () { return Promise.resolve(); },
     },
+    auth: {
+      status: function () { return Promise.resolve(this.account || { signedIn: false, email: null, backendConfigured: true }); },
+      onStatus: function (cb) { this.listener = cb; var self = this; return function () { self.listener = null; }; },
+      signIn: function (creds) {
+        if (creds.password === 'wrong') return Promise.reject(new Error('Invalid login credentials'));
+        this.account = { signedIn: true, email: creds.email, backendConfigured: true };
+        if (this.listener) this.listener(this.account);
+        return Promise.resolve(this.account);
+      },
+      signUp: function () { return Promise.resolve({ confirmationRequired: true, account: { signedIn: false, email: null, backendConfigured: true } }); },
+      signOut: function () { this.account = { signedIn: false, email: null, backendConfigured: true }; if (this.listener) this.listener(this.account); return Promise.resolve(this.account); },
+    },
     sync: {
       onStatus: function () { return function () {}; },
       onVaultUpdated: function () { return function () {}; },

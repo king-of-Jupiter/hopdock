@@ -356,6 +356,35 @@
 .hd-password-field .hd-input { width: 100%; padding-right: 42px; }
 .hd-password-field > .hd-icon-btn { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); }
 .hd-password-field > .hd-icon-btn:active { transform: translateY(-50%) scale(.96); }
+.hd-auth-screen { display: flex; flex-direction: column; background: var(--hd-bg); min-height: 100vh; height: auto; }
+.hd-auth-header { display: flex; align-items: center; justify-content: space-between; padding: 30px 40px; }
+.hd-auth-header .hd-brand { padding: 0; margin: 0; }
+.hd-auth-content { width: 360px; max-width: calc(100vw - 48px); margin: clamp(24px, 8vh, 100px) auto 60px; }
+.hd-auth-content h1 { margin: 0; font: 600 28px/1.25 var(--hd-font-ui); }
+.hd-auth-description { margin: 12px 0 30px; color: var(--hd-muted); font-size: 15px; line-height: 1.5; }
+.hd-account-fields { gap: 18px; }
+.hd-account-fields .hd-input { box-sizing: border-box; width: 100%; height: 42px; }
+.hd-account-fields label { gap: 7px; font-size: 13px; }
+.hd-account-submit { width: 100%; min-height: 42px; margin-top: 4px; }
+.hd-text-button { border: 0; background: transparent; padding: 0; color: var(--hd-accent); cursor: pointer; font: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.hd-text-button:disabled { opacity: .5; cursor: default; }
+.hd-account-alternative { text-align: center; margin: 0; color: var(--hd-muted); font-size: 13px; }
+.hd-auth-offline { border-top: 1px solid var(--hd-border); margin-top: 28px; padding-top: 24px; text-align: center; font-size: 14px; }
+.hd-auth-offline p { color: var(--hd-muted); margin: 8px 0 0; font-size: 12px; }
+.hd-auth-footer { margin-top: auto; padding: 20px 40px; color: var(--hd-muted); font: 11px var(--hd-font-mono); }
+.hd-auth-loading { margin: auto; color: var(--hd-muted); }
+.hd-account-nav > span:last-child { min-width: 0; }
+.hd-account-nav strong { display: block; font-weight: 600; }
+.hd-account-nav small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 158px; font-size: 11px; color: var(--hd-muted); margin-top: 3px; }
+.hd-account-profile { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; }
+.hd-account-profile > strong { overflow-wrap: anywhere; }
+.hd-account-profile > svg { color: var(--hd-accent); }
+.hd-account-profile p { margin: 0; }
+.hd-account-notice { border-left: 2px solid var(--hd-accent); padding-left: 12px; color: var(--hd-muted); font-size: 13px; line-height: 1.5; margin: 0; }
+.hd-settings-account { display: flex; gap: 16px; align-items: center; justify-content: space-between; }
+.hd-settings-account > div { min-width: 0; }
+.hd-settings-account strong { font-size: 14px; overflow-wrap: anywhere; }
+.hd-settings-account .hd-dialog-note { margin: 5px 0 0; }
 .hd-card-copy .hd-host-address { font-family: var(--hd-font-mono); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hd-tile { width: 40px; height: 40px; border-radius: 9px; }
 .hd-tile img { width: 24px; height: 24px; }

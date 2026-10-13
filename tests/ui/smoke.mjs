@@ -76,7 +76,7 @@ try {
   await page.locator('.hd-rail-item', { hasText: 'Snippets' }).click();
   check('snippets render', await page.locator('[data-testid="snippets-table"]').isVisible());
   await page.locator('.hd-rail-item', { hasText: 'Settings' }).click();
-  check('settings renders sync form', await page.getByText('Vault sync (Supabase)', { exact: true }).isVisible());
+  check('settings renders sync form', await page.getByText('Cloud sync', { exact: true }).isVisible());
   check('settings renders updater', await page.getByText('Application updates').isVisible());
 
   await page.getByRole('button', { name: 'Hosts', exact: true }).click();

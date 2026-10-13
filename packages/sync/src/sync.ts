@@ -10,6 +10,24 @@ export interface SyncCreds {
   password: string;
 }
 
+export interface SessionStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+  removeItem(key: string): void;
+}
+
+export async function authenticateAccount(creds: SyncCreds, create = false) {
+  const client = createClient(creds.url, creds.anonKey, {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    realtime: { transport: WebSocket as unknown as WebSocketLikeConstructor },
+  });
+  const { data, error } = create
+    ? await client.auth.signUp({ email: creds.email, password: creds.password })
+    : await client.auth.signInWithPassword({ email: creds.email, password: creds.password });
+  if (error) throw error;
+  return data;
+}
+
 export type ItemKind = 'host' | 'group' | 'key' | 'snippet';
 
 export interface VaultItem {
@@ -30,19 +48,28 @@ export class SyncEngine {
   private email = '';
   private password = '';
 
-  configure(creds: SyncCreds | null): void {
+  configure(creds: SyncCreds | null, storage?: SessionStorage): void {
+    this.client?.auth.stopAutoRefresh();
+    if (this.client) void this.client.removeAllChannels();
     if (!creds || !creds.url || !creds.anonKey) {
       this.client = null;
       return;
     }
     // ws implements the browser-compatible transport, with different Event callback types.
-    this.client = createClient(creds.url, creds.anonKey, { realtime: { transport: WebSocket as unknown as WebSocketLikeConstructor } });
+    this.client = createClient(creds.url, creds.anonKey, {
+      realtime: { transport: WebSocket as unknown as WebSocketLikeConstructor },
+      auth: { persistSession: !!storage, storage, storageKey: 'hopdock-auth', detectSessionInUrl: false },
+    });
     this.email = creds.email;
     this.password = creds.password;
   }
 
   get configured(): boolean {
     return this.client != null;
+  }
+
+  async signOut(): Promise<void> {
+    if (this.client) await this.client.auth.signOut({ scope: 'local' });
   }
 
   private async authed(): Promise<SupabaseClient> {

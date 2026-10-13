@@ -1,7 +1,11 @@
 {
-  "date": "2026-10-13T22:33:48.984Z",
-  "profile": "C:\\Users\\freshh\\AppData\\Local\\Temp\\hopdock-desktop-test-JKolNN",
+  "date": "2026-10-13T23:01:41.693Z",
+  "profile": "C:\\Users\\freshh\\AppData\\Local\\Temp\\hopdock-desktop-test-pTv39N",
   "results": [
+    {
+      "name": "Welcome sign-in screen, confirmation flow and local/offline access",
+      "passed": true
+    },
     {
       "name": "Native preload, sandbox and isolated empty vault",
       "passed": true
@@ -100,6 +104,10 @@
     },
     {
       "name": "Real Supabase SDK and IPC: encrypted two-device sync; restored SSH password/key and snippet execution",
+      "passed": true
+    },
+    {
+      "name": "Account drawer: wrong password, sign-out preserves data, real login and persisted session",
       "passed": true
     },
     {

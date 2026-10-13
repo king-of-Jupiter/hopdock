@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import type { Host, HostGroup, KeyRef, Snippet } from '@hopdock/core';
 import {
   AppShell,
+  AuthScreen,
+  AccountDrawer,
   HostForm,
   HostsView,
   KeychainView,
@@ -14,13 +16,25 @@ import {
   notifyError,
   confirmAction,
 } from '@hopdock/ui';
-import type { HostDraft, RailView, Tab } from '@hopdock/ui';
+import type { HostDraft, RailView, Tab, AccountStatus } from '@hopdock/ui';
 import '@hopdock/ui/tokens.css';
 import { buildVersion, buildCommit } from '../build-info';
 
 export function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>(() => localStorage.getItem('hopdock.theme') === 'dark' ? 'dark' : 'light');
   const [hideGroupedHosts, setHideGroupedHosts] = useState(() => localStorage.getItem('hopdock.hideGroupedHosts') === 'true');
+  const [account, setAccount] = useState<AccountStatus | null>(null);
+  const [accountOpen, setAccountOpen] = useState(false);
+  const [welcomeDismissed, setWelcomeDismissed] = useState(() => localStorage.getItem('hopdock.welcomeDismissed') === 'true');
+  useEffect(() => { if (welcomeDismissed) localStorage.setItem('hopdock.welcomeDismissed', 'true'); }, [welcomeDismissed]);
+  useEffect(() => {
+    const stop = window.hopdock.auth.onStatus((next) => { setAccount(next); if (next.signedIn) setWelcomeDismissed(true); });
+    void Promise.all([window.hopdock.auth.status(), window.hopdock.vault.get()]).then(([next, library]) => {
+      setAccount(next);
+      if (next.signedIn || library.hosts.length || library.keys.length || library.snippets.length) setWelcomeDismissed(true);
+    }).catch((error) => { setAccount({ signedIn: false, email: null, backendConfigured: false }); notifyError(error, 'Load account'); });
+    return stop;
+  }, []);
   useEffect(() => { localStorage.setItem('hopdock.theme', theme); }, [theme]);
   useEffect(() => { localStorage.setItem('hopdock.hideGroupedHosts', String(hideGroupedHosts)); }, [hideGroupedHosts]);
   useEffect(() => {
@@ -157,12 +171,22 @@ export function App() {
 
   const tab = tabs[activeTab] ?? { kind: 'vaults' as const };
   const sftpHost = tab.kind === 'sftp' ? hosts.find((h) => h.id === tab.hostId) ?? null : null;
+  const openSyncSettings = () => { setAccountOpen(false); setRail('settings'); setActiveTab(0); };
+  const signedIn = (next: AccountStatus) => {
+    setAccount(next); setWelcomeDismissed(true); setAccountOpen(false);
+    void window.hopdock.sync.status().then((status) => { if (!status.passwordsConfigured) openSyncSettings(); }).catch((error) => notifyError(error, 'Load sync settings'));
+    void reload();
+  };
+  if (!account) return <div className="hd-app hd-auth-screen" data-theme={theme}><div className="hd-auth-loading" role="status">Loading Hopdock…</div></div>;
+  if (!welcomeDismissed && !account.signedIn) return <AuthScreen account={account} theme={theme} onTheme={setTheme} onSignedIn={signedIn} onOffline={() => setWelcomeDismissed(true)} version={`hopdock ${buildVersion} · ${buildCommit}`} />;
 
   return (
     <AppShell
       theme={theme}
       onTheme={setTheme}
       railView={rail}
+      accountEmail={account.signedIn ? account.email : null}
+      onAccount={() => setAccountOpen(true)}
       onRailView={(v) => {
         setRail(v);
         setActiveTab(0);
@@ -199,7 +223,8 @@ export function App() {
       )}
       {tab.kind === 'vaults' && rail === 'keys' && <KeychainView keys={keys} hosts={hosts} onChanged={() => void reload()} />}
       {tab.kind === 'vaults' && rail === 'snippets' && <SnippetsView snippets={snippets} hosts={hosts} onChanged={() => void reload()} />}
-      {tab.kind === 'vaults' && rail === 'settings' && <SettingsView hideGroupedHosts={hideGroupedHosts} onHideGroupedHosts={setHideGroupedHosts} onSynced={reload} />}
+      {tab.kind === 'vaults' && rail === 'settings' && <SettingsView hideGroupedHosts={hideGroupedHosts} onHideGroupedHosts={setHideGroupedHosts} onSynced={reload} account={account} onAccount={() => setAccountOpen(true)} />}
+      {accountOpen && <AccountDrawer account={account} onSignedIn={signedIn} onSignedOut={(next) => { setAccount(next); setAccountOpen(false); void reload(); }} onClose={() => setAccountOpen(false)} onSyncSettings={openSyncSettings} />}
       {form.open && <HostForm initial={form.initial} keys={keys} groups={groups} defaultGroupId={form.groupId} onChanged={() => void reload()} onSave={saveHost} onClose={() => setForm({ open: false })} />}
       <TextPrompt />
       <ErrorNotifications />
