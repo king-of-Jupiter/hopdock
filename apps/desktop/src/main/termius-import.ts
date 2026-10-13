@@ -19,7 +19,7 @@ const path = (row: Record<string, unknown>, key: string) => {
 const identity = (kind: string, source: string) => `${kind}-termius-${createHash('sha256').update(source).digest('hex').slice(0, 32)}`;
 
 /** Plan completely in memory before touching files, passwords or the saved vault. */
-export function planTermiusImport(json: string, source: VaultFile) {
+export function planTermiusImport(json: string, source: VaultFile, secretExists: (key: string) => boolean = () => false) {
   if (Buffer.byteLength(json, 'utf8') > 64 * 1024 * 1024) throw new Error('Termius migration file is too large.');
   let bundle: Record<string, unknown>;
   try { bundle = JSON.parse(json.replace(/^\uFEFF/, '')); } catch { throw invalid(); }
@@ -70,7 +70,22 @@ export function planTermiusImport(json: string, source: VaultFile) {
     const username = text(row, 'username').trim();
     const name = text(row, 'label').trim() || address;
     const id = identity('h', text(row, 'id') || JSON.stringify([name, address, username, row.port]));
-    if (vault.hosts.some((host) => host.id === id)) { result.skipped++; continue; }
+    const existing = vault.hosts.find((host) => host.id === id);
+    if (existing) {
+      const password = text(row, 'password');
+      const sourceKey = text(row, 'key_id');
+      const keyId = sourceKey ? keyIds.get(sourceKey) : undefined;
+      // Repair only the recognizable incomplete import. Preserve user edits and secrets.
+      if (existing.remark === 'Imported from Termius' && existing.host === address && existing.port === (row.port ?? 22)
+          && !existing.username && existing.auth.type === 'agent' && !secretExists(`pw:${id}`) && username && (password || keyId)) {
+        existing.username = username;
+        existing.auth = { type: keyId ? (password ? 'key-password' : 'key') : 'password', ...(keyId ? { keyId } : {}) };
+        existing.updatedAt = now;
+        if (password) secretWrites.set(`pw:${id}`, password);
+        result.repaired = (result.repaired ?? 0) + 1;
+      } else result.skipped++;
+      continue;
+    }
     let port = row.port ?? 22;
     if (typeof port !== 'number' || !Number.isInteger(port) || port < 1 || port > 65535) { port = 22; warn('An invalid SSH port was replaced with 22.'); }
     const groupName = path(row, 'group_path');

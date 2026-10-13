@@ -8,16 +8,18 @@ import pathlib
 import shutil
 import sys
 import tempfile
+from types import SimpleNamespace
 
 from termius_export import source
 from termius_export.crypto import DecryptionFailed, Decryptor, UnknownCipherVersion, first_ciphertext
 from termius_export.datadir import default_data_dir
 from termius_export.localkey import LocalKeyNotFound, load_local_key
 from termius_export.normalize import build_model
-from termius_normalizer import build_bundle
+from termius_normalizer import build_bundle, apply_identity_links
+from termius_storage import read_tables
 
 COMMIT = 'd1a34e9bbf1dcf63dbcb910cfc24d54460a287d0'
-EXTRA = ('snippets', 'scripts', 'snippets_packages', 'snippet_packages', 'snippet_groups', 'snippet_folders')
+EXTRA = ('snippets', 'scripts', 'snippets_packages', 'snippet_packages', 'snippet_groups', 'snippet_folders', 'ssh_config_identities', 'ssh_config_identities_shared')
 
 def read_bundle(data_dir=None):
     candidates = [data_dir] if data_dir else [os.path.join(os.environ.get('APPDATA', ''), 'Termius') if os.environ.get('APPDATA') else None, default_data_dir()]
@@ -37,7 +39,7 @@ def read_bundle(data_dir=None):
         snapshot = pathlib.Path(temporary) / 'profile'
         shutil.copytree(leveldb, snapshot, ignore=shutil.ignore_patterns('LOCK'))
         source.WANTED_DATABASES = tuple(dict.fromkeys((*source.WANTED_DATABASES, *EXTRA)))
-        tables = source.read_tables(snapshot)
+        tables = read_tables(source, snapshot)
         sample = first_ciphertext(tables.tables)
         def valid(key):
             if sample is None:
@@ -49,8 +51,9 @@ def read_bundle(data_dir=None):
                 return False
         key, _ = load_local_key(None, valid)
         decryptor = Decryptor.from_base64(key)
-        model = build_model(tables, decryptor, source_info={'leveldb': str(leveldb)})
         decrypted = {name: [decryptor.walk(row) for row in rows] for name, rows in tables.tables.items()}
+        apply_identity_links(decrypted)
+        model = build_model(source.RawTables(decrypted, tables.counts_before_dedup), SimpleNamespace(walk=lambda row: row, stats=decryptor.stats), source_info={'leveldb': str(leveldb)})
         return build_bundle(model, decrypted, include_secrets=True, tool_commit=COMMIT)
 
 def main():

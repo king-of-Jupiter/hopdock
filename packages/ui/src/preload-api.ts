@@ -37,6 +37,7 @@ export interface SyncCredsInput {
   password: string;
 }
 export interface TermiusImportResult {
+  repaired?: number;
   hosts: number; groups: number; keys: number; snippets: number; skipped: number; warnings: string[];
 }
 

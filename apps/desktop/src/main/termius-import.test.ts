@@ -30,6 +30,20 @@ test('invalid containers and malformed late rows leave the input vault unchanged
   for (const input of ['{bad', 'null', bundle({ hosts: 'wrong' }), bundle({ keys: [null] }), bundle({ version: 9 }), bundle({ hosts: [{ address: 'good.invalid', password: 'secret' }, { address: 'next.invalid', group_path: [123] }] })]) assert.throws(() => planTermiusImport(input, source), /Invalid Termius/);
   assert.deepEqual(source, before);
 });
+test('reimport repairs missing credentials without duplicating hosts or replacing edits/secrets', () => {
+  const broken = planTermiusImport(bundle({ hosts: [{ id: 'h', address: 'example.invalid' }] }), empty()).vault;
+  const restored = bundle({ hosts: [{ id: 'h', address: 'example.invalid', username: 'tester', password: 'restored' }] });
+  const fixed = planTermiusImport(restored, broken);
+  assert.equal(fixed.vault.hosts.length, 1);
+  assert.equal(fixed.vault.hosts[0]!.username, 'tester');
+  assert.equal(fixed.vault.hosts[0]!.auth.type, 'password');
+  assert.equal(fixed.secretWrites.get(`pw:${fixed.vault.hosts[0]!.id}`), 'restored');
+  assert.equal(fixed.result.repaired, 1);
+  assert.equal(planTermiusImport(restored, broken, () => true).secretWrites.size, 0);
+  broken.hosts[0]!.username = 'custom';
+  assert.equal(planTermiusImport(restored, broken).vault.hosts[0]!.username, 'custom');
+  assert.equal(planTermiusImport(restored, broken).secretWrites.size, 0);
+});
 test('missing keys/credentials, invalid ports and unsupported configurations produce safe notes', () => {
   const plan = planTermiusImport(bundle({ keys: [{ id: 'missing', private_key: '' }, { id: 'bad', private_key: 'secret-malformed-material' }], hosts: [{ id: 'h', address: 'example.invalid', port: -1, key_id: 'bad', proxy: {}, agent_forward: true, forwards: [{}] }, { address: '' }], snippets: [{ command: '' }] }), empty());
   assert.equal(plan.vault.hosts[0]?.port, 22); assert.equal(plan.vault.hosts[0]?.auth.type, 'agent');

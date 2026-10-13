@@ -22,6 +22,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run test:ssh
+      - run: python3 tools/test_termius_storage.py
       - run: npx tsx --test packages/core/src/errors.test.ts apps/desktop/build-supabase.test.ts apps/desktop/src/main/password-sync.test.ts apps/desktop/src/main/putty-key.test.ts apps/desktop/src/main/update-controller.test.ts
       - run: npx playwright install --with-deps chromium
       - run: npm run build --workspace apps/desktop

@@ -60,6 +60,26 @@ def _is_deleted(row: dict) -> bool:
     return bool(row.get("deleted") or row.get("is_deleted") or status.startswith("DELETE"))
 
 
+def apply_identity_links(tables: dict[str, list[dict]]) -> None:
+    """New Termius versions move config-to-identity relations into a join table."""
+    configs = _index(tables.get('ssh_configs', []))
+    identities = _index(tables.get('ssh_identities', []))
+    links: dict[str, dict[str, dict]] = {}
+    for table in ('ssh_config_identities', 'ssh_config_identities_shared'):
+        for row in tables.get(table, []):
+            if _is_deleted(row):
+                continue
+            config = _deref(row.get('ssh_config'), configs)
+            identity = _deref(row.get('identity'), identities)
+            if config is not None and identity is not None and not _is_deleted(identity):
+                links.setdefault(_entity_key(config), {})[_entity_key(identity)] = identity
+    for config in tables.get('ssh_configs', []):
+        candidates = links.get(_entity_key(config), {})
+        if _deref(config.get('identity'), identities) is None and len(candidates) == 1:
+            identity = next(iter(candidates.values()))
+            config['identity'] = {field: identity[field] for field in ('id', 'local_id') if identity.get(field) is not None}
+
+
 def _parents(row: dict | None, index: dict[str, dict], fields: tuple[str, ...]) -> list[dict]:
     """Return root-to-leaf ancestors, stopping safely on malformed cycles."""
     chain: list[dict] = []

@@ -121,7 +121,7 @@ export function registerIpc(): void {
     const json = await readTermiusProfile();
     requireSyncIdle();
     if (pendingKeyWrites) throw new Error('Wait for key generation or import to finish before syncing.');
-    const plan = planTermiusImport(json, vault());
+    const plan = planTermiusImport(json, vault(), hasSecret);
     const files = keyFileStorage(keysDir());
     const writtenKeys: string[] = [], writtenSecrets: string[] = [];
     try {

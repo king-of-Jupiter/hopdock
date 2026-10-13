@@ -15,3 +15,11 @@ Profile-not-found, missing/mismatched local encryption key, unsupported encrypti
 Build helper: npm run build:termius-reader --workspace apps/desktop. The dist/dist:publish scripts and platform CI builds prepare it automatically. Dependency notices ship beside the executable. The copied Termorator normalizer has a small adaptation to preserve leading/trailing whitespace in passwords.
 
 Validation on Windows: 28 isolated Electron scenarios, 19 browser checks, importer/error unit cases, typecheck and build passed. The direct-import scenario verifies that no file picker opens, credentials work with a local SSH fixture, snippets execute, duplicate imports skip records and malformed data leaves the library unchanged. An opt-in real-profile test (node tests/desktop/termius-direct-real.mjs) tested the actual bundled reader against this machine's Termius data, imported 36 hosts, 3 groups, 4 keys and 22 snippets into a temporary isolated Hopdock profile, then verified duplicate handling and deleted that test profile. The source contained 37 hosts; one invalid-address record was skipped. The user's normal Hopdock vault was not populated by testing. macOS/Linux helper builds are configured but were not executed locally.
+# Credential relation compatibility
+
+The reader restores local IDs from numeric IndexedDB record keys when Termius stores
+them outside row values. It reads the newer `ssh_config_identities` join table as
+well as inline identities. It never guesses between multiple identity links.
+Reimport repairs existing imported hosts only when username and authentication were
+both absent, the endpoint is unchanged, and no local password exists. Existing
+credentials and edits are preserved; repaired hosts appear in the import summary.
