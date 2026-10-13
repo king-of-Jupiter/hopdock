@@ -45,6 +45,9 @@
     { id: 's-dclean', vaultId: 'v-personal', folder: 'docker', name: 'docker cleanup', script: 'docker system prune -af --filter "until=${hours}h"', vars: ['hours'], updatedAt: '' },
   ];
 
+  if (!window.HOPDOCK_TEST_FIXTURES) {
+    hosts = []; groups = []; keys = []; snippets = [];
+  }
   var dataCbs = new Set();
   var BANNER =
     'Welcome to Ubuntu 22.04.4 LTS (GNU/Linux 5.15.0-105-generic x86_64)\r\n' +
@@ -109,12 +112,22 @@
   }
 
   window.hopdock = {
-    version: '0.0.1',
+    version: '0.0.6',
+    files: {
+      pick: function () { return Promise.resolve(null); },
+      places: function () { return Promise.resolve([{ name: 'Home', path: '/home/demo' }, { name: 'Downloads', path: '/home/demo/Downloads' }]); },
+      list: function (path) { return Promise.resolve({ path: path, parent: '/home/demo', separator: '/', entries: [{ name: 'id_ed25519', path: path + '/id_ed25519', directory: false, size: 411 }, { name: 'Documents', path: path + '/Documents', directory: true, size: 0 }] }); },
+      exists: function () { return Promise.resolve(false); },
+    },
     vault: {
-      get: function () { return Promise.resolve({ hosts: hosts, keys: keys, snippets: snippets }); },
+      get: function () { return Promise.resolve({ hosts: hosts, groups: groups, keys: keys, snippets: snippets }); },
+      onHostUpdated: function () { return function () {}; },
+      readHostPassword: function () { return Promise.resolve('preview-password'); },
+      importTermius: function () { return Promise.resolve({ hosts: 0, groups: 0, keys: 0, snippets: 0, skipped: 0, warnings: [] }); },
+      saveGroup: function (name) { var existing = groups.find(function (g) { return g.name.toLowerCase() === name.trim().toLowerCase(); }); if (existing) return Promise.resolve(existing); var g = { id: 'g-' + Date.now(), vaultId: 'v-personal', name: name.trim(), sort: groups.length }; groups.push(g); return Promise.resolve(g); },
       saveHost: function (input, id) {
-        var h = { id: id || 'h-shot', vaultId: 'v-personal', groupId: 'g-dev', name: input.name, host: input.host, port: input.port, username: input.username, auth: input.auth, portForwards: [], tags: input.tags, remark: '', sort: 99, starred: false, updatedAt: '' };
-        hosts.push(h);
+        var h = { id: id || 'h-' + Date.now(), vaultId: 'v-personal', groupId: input.groupId || null, name: input.name, host: input.host, port: input.port, username: input.username, auth: input.auth, portForwards: [], tags: input.tags, remark: '', sort: 99, starred: false, updatedAt: '' };
+        hosts = hosts.filter(function (entry) { return entry.id !== h.id; }); hosts.push(h);
         return Promise.resolve(h);
       },
       deleteHost: function (id) { hosts = hosts.filter(function (h) { return h.id !== id; }); return Promise.resolve(); },
@@ -136,6 +149,7 @@
       onClose: function () { return function () {}; },
     },
     sftp: {
+      realpath: function () { return Promise.resolve('/root'); },
       list: function (id, path) { return Promise.resolve(entriesFor(path)); },
       downloadTo: function () { return Promise.resolve(null); },
       uploadFrom: function () { return Promise.resolve(null); },
@@ -147,6 +161,9 @@
       onProgress: function () { return function () {}; },
     },
     keys: {
+      read: function () { return Promise.resolve({ privateKey: '-----BEGIN OPENSSH PRIVATE KEY-----\nPreview key material\n-----END OPENSSH PRIVATE KEY-----', passphrase: '' }); },
+      update: function (id, input) { var key = keys.find(function (key) { return key.id === id; }); key.name = input.name; return Promise.resolve(key); },
+      export: function (id, path) { return Promise.resolve(path); },
       generate: function (name) { return Promise.resolve(keys[0]); },
       importFile: function () { return Promise.resolve(null); },
       delete: function () { return Promise.resolve(); },
@@ -158,11 +175,19 @@
       remove: function () { return Promise.resolve(); },
     },
     sync: {
-      status: function () { return Promise.resolve({ configured: false, lastSyncAt: 'never', lastError: null }); },
+      status: function () { return Promise.resolve({ configured: false, backendConfigured: true, projectUrl: 'https://preview.supabase.co', passwordsConfigured: !!this.passwordsConfigured, lastSyncAt: 'never', lastError: null }); },
       saveCreds: function () { return Promise.resolve(); },
+      setEncryptionPassword: function () { this.passwordsConfigured = true; return Promise.resolve(); },
       syncNow: function () { return Promise.resolve({ pushed: 0, pulled: 0 }); },
     },
+    winscp: {
+      status: function () { return Promise.resolve({ supported: true, path: 'C:\\Program Files (x86)\\WinSCP\\WinSCP.exe' }); },
+      configure: function () { return Promise.resolve(); },
+      open: function () { return Promise.resolve(); },
+    },
     updater: {
+      status: function () { return Promise.resolve({ state: 'idle', revision: 0 }); },
+      install: function () { return Promise.resolve(); },
       check: function () { return Promise.resolve(); },
       onStatus: function () { return function () {}; },
     },

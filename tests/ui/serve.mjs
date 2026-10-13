@@ -6,6 +6,7 @@ import { join, extname } from 'path';
 
 const root = process.argv[2] ?? 'apps/desktop/out/renderer';
 const port = Number(process.argv[3] ?? 8901);
+const fixtures = process.argv.includes('--fixtures');
 const mock = readFileSync(new URL('./mock.js', import.meta.url));
 
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.png': 'image/png', '.svg': 'image/svg+xml', '.json': 'application/json' };
@@ -22,7 +23,7 @@ const server = createServer((req, res) => {
     const file = join(root, path);
     let data = readFileSync(file);
     if (path.endsWith('/index.html') || path === '/index.html') {
-      const html = data.toString().replace('<div id="root"></div>', '<div id="root"></div><script src="./mock.js"></script>');
+      const html = data.toString().replace('<div id="root"></div>', '<div id="root"></div>' + (fixtures ? '<script>window.HOPDOCK_TEST_FIXTURES = true;</script>' : '') + '<script src="./mock.js"></script>');
       data = Buffer.from(html);
     }
     res.writeHead(200, { 'Content-Type': TYPES[extname(file)] ?? 'application/octet-stream' });

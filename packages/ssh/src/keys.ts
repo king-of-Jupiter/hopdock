@@ -1,6 +1,18 @@
 import { execFile } from 'child_process';
 import { readFile } from 'fs/promises';
 import sshpk from 'sshpk';
+import ssh2 from 'ssh2';
+
+/** Parse in memory: avoids ssh-keygen ACL restrictions and interactive passphrase prompts. */
+export function publicKeyFromPrivate(privateKey: string, passphrase?: string) {
+  const parsed = ssh2.utils.parseKey(privateKey, passphrase);
+  if (parsed instanceof Error) throw new Error(`Unable to import private key: ${parsed.message}`);
+  const key = Array.isArray(parsed) ? parsed[0] : parsed;
+  if (!key || !key.isPrivateKey()) throw new Error('Select a private SSH key.');
+  const publicKey = `${key.type} ${key.getPublicSSH().toString('base64')}`;
+  const kind = key.type === 'ssh-ed25519' ? 'Ed25519' as const : key.type === 'ssh-rsa' ? 'RSA' as const : 'EC' as const;
+  return { publicKey, kind };
+}
 
 /** SHA256 fingerprint of an OpenSSH public key line. */
 export function fingerprint(publicKeyText: string): string {

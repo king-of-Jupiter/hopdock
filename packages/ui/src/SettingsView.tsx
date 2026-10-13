@@ -1,38 +1,60 @@
 import { useEffect, useState } from 'react';
-import type { SyncStatus, UpdateStatus } from './preload-api';
+import type { SyncStatus, UpdateStatus, TermiusImportResult } from './preload-api';
+import { pickFiles } from './FilePicker';
+import { ErrorNotice, notifyError } from './ErrorNotice';
+import { IconDownload } from '@tabler/icons-react';
 
-export function SettingsView() {
-  const [url, setUrl] = useState('');
-  const [anonKey, setAnonKey] = useState('');
+export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced }: { hideGroupedHosts: boolean; onHideGroupedHosts: (value: boolean) => void; onSynced?: () => Promise<void> }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [encryptionPassword, setEncryptionPassword] = useState('');
   const [status, setStatus] = useState<SyncStatus | null>(null);
   const [update, setUpdate] = useState<UpdateStatus>({ state: 'idle' });
   const [msg, setMsg] = useState('');
+  const [syncError, setSyncError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [winSCP, setWinSCP] = useState<{ supported: boolean; path: string | null } | null>(null);
+  const [winSCPError, setWinSCPError] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<TermiusImportResult | null>(null);
+  const [importError, setImportError] = useState('');
+  const importTermius = async () => {
+    if (importing) return;
+    setImporting(true); setImportError('');
+    try {
+      setImportResult(null);
+      setImportResult(await window.hopdock.vault.importTermius());
+      await onSynced?.();
+    } catch (error) { setImportError(String(error)); }
+    finally { setImporting(false); }
+  };
 
   const refresh = async () => {
     try {
       setStatus(await window.hopdock.sync.status());
-    } catch {
-      /* preload unavailable */
+    } catch (error) {
+      setSyncError(String(error));
     }
   };
   useEffect(() => {
     void refresh();
-    return window.hopdock.updater.onStatus(setUpdate);
+    void window.hopdock.winscp.status().then(setWinSCP).catch((error) => notifyError(error, 'Load WinSCP integration'));
+    const apply = (next: UpdateStatus) => setUpdate((previous) => (next.revision ?? 0) >= (previous.revision ?? 0) ? next : previous);
+    const stop = window.hopdock.updater.onStatus(apply);
+    void window.hopdock.updater.status().then(apply).catch((error) => setUpdate({ state: 'error', message: String(error) }));
+    return stop;
   }, []);
 
   const save = async () => {
     setBusy(true);
-    setMsg('');
+    setMsg(''); setSyncError('');
     try {
-      await window.hopdock.sync.saveCreds({ url: url.trim(), anonKey: anonKey.trim(), email: email.trim(), password });
+      await window.hopdock.sync.saveCreds({ email: email.trim(), password });
       setPassword('');
       setMsg('Credentials saved to OS keychain.');
       await refresh();
     } catch (e) {
-      setMsg(String(e));
+      setSyncError(String(e));
     } finally {
       setBusy(false);
     }
@@ -40,20 +62,56 @@ export function SettingsView() {
 
   const syncNow = async () => {
     setBusy(true);
-    setMsg('');
+    setMsg(''); setSyncError('');
     try {
       const r = await window.hopdock.sync.syncNow();
+      await onSynced?.();
       setMsg(`Synced: pushed ${r.pushed}, pulled ${r.pulled}.`);
       await refresh();
     } catch (e) {
-      setMsg(String(e));
+      setSyncError(String(e));
     } finally {
       setBusy(false);
     }
   };
 
+  const saveEncryptionPassword = async () => {
+    setBusy(true);
+    setMsg(''); setSyncError('');
+    try {
+      await window.hopdock.sync.setEncryptionPassword(encryptionPassword);
+      setEncryptionPassword('');
+      setMsg('Encryption password saved on this device.');
+      await refresh();
+    } catch (e) { setSyncError(String(e)); }
+    finally { setBusy(false); }
+  };
+
   return (
-    <div style={{ maxWidth: 560 }}>
+    <div className="hd-settings">
+      <h1 className="hd-page-title">Settings</h1>
+      <div className="hd-settings-library-heading"><h2 className="hd-sec">Host library</h2><button className="hd-btn hd-import-button" type="button" disabled={importing || busy} onClick={() => void importTermius()}><IconDownload size={16} stroke={1.6} aria-hidden="true" />{importing ? 'Importing…' : 'Import from Termius'}</button></div>
+      {(importResult || importError) && <div>
+        {importResult && <div className="hd-import-result" role="status"><strong>Imported</strong><p>{importResult.hosts} hosts · {importResult.groups} groups · {importResult.keys} keys · {importResult.snippets} snippets{importResult.skipped > 0 ? ` · ${importResult.skipped} skipped or already imported` : ''}</p>{importResult.warnings.length > 0 && <details><summary>Import notes ({importResult.warnings.length})</summary><ul>{[...new Set(importResult.warnings)].map((note) => <li key={note}>{note}</li>)}</ul></details>}</div>}
+        <ErrorNotice error={importError} context="Import from Termius" onDismiss={() => setImportError('')} />
+      </div>}
+      <label className="hd-preference">
+        <span><strong>Hide grouped hosts</strong><span className="sub">Show only ungrouped hosts in the main list. Open a group to see its hosts.</span></span>
+        <input type="checkbox" checked={hideGroupedHosts} onChange={(e) => onHideGroupedHosts(e.target.checked)} />
+      </label>
+      {winSCP?.supported && <>
+        <div className="hd-sec">WinSCP integration</div>
+        <div className="hd-card hd-settings-panel">
+          <p className="hd-dialog-note">Open a host’s menu and choose “Open in WinSCP” to manage its files with your saved credentials.</p>
+          <label className="hd-form">WinSCP executable<input className="hd-input mono" readOnly value={winSCP.path ?? ''} placeholder="WinSCP was not found" /></label>
+          <div className="hd-row"><button className="hd-btn" type="button" onClick={async () => {
+            setWinSCPError('');
+            try { const paths = await pickFiles('Choose WinSCP.exe'); if (paths?.[0]) { await window.hopdock.winscp.configure(paths[0]); setWinSCP(await window.hopdock.winscp.status()); } }
+            catch (error) { setWinSCPError(String(error)); }
+          }}>Browse WinSCP</button><button className="hd-btn" type="button" onClick={async () => { try { await window.hopdock.winscp.configure(''); setWinSCP(await window.hopdock.winscp.status()); setWinSCPError(''); } catch (error) { setWinSCPError(String(error)); } }}>Detect automatically</button></div>
+          <ErrorNotice error={winSCPError} context="WinSCP configuration" onDismiss={() => setWinSCPError('')} />
+        </div>
+      </>}
       <div className="hd-sec">Application updates</div>
       <div className="hd-card" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'stretch' }}>
         <div style={{ fontSize: 13 }}>
@@ -61,43 +119,50 @@ export function SettingsView() {
         </div>
         <div style={{ fontSize: 12, color: 'var(--hd-muted)', marginTop: 4 }}>
           {update.state === 'idle' && 'Updates install automatically from GitHub Releases.'}
+          {update.state === 'up-to-date' && `You’re up to date. Latest release: ${update.version ?? window.hopdock.version}.`}
           {update.state === 'checking' && 'Checking for updates…'}
           {update.state === 'available' && `Update ${update.version ?? ''} found, downloading…`}
           {update.state === 'downloading' && `Downloading… ${update.percent ?? 0}%`}
           {update.state === 'downloaded' && `Version ${update.version ?? ''} downloaded — restart to install.`}
-          {update.state === 'error' && `Update check failed: ${update.message ?? 'unknown error'}`}
         </div>
+        {update.state === 'error' && <ErrorNotice error={update.message || 'Update failed'} context="Check updates" onDismiss={() => setUpdate({ state: 'idle' })} />}
         <div className="hd-row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
-          <button className="hd-btn" type="button" disabled={busy} onClick={() => void window.hopdock.updater.check()}>
+          <button className="hd-btn" type="button" disabled={busy || update.state === 'checking' || update.state === 'available' || update.state === 'downloading' || update.state === 'downloaded'} onClick={() => void window.hopdock.updater.check().catch((error) => setUpdate({ state: 'error', message: String(error) }))}>
             Check for updates
           </button>
+          {update.state === 'downloaded' && <button className="hd-btn primary" type="button" onClick={() => void window.hopdock.updater.install().catch((error) => setUpdate({ state: 'error', message: String(error) }))}>Restart to install</button>}
         </div>
+        {update.checkedAt && <p className="hd-dialog-note">Last checked: {new Date(update.checkedAt).toLocaleString()}</p>}
       </div>
-      <div className="hd-sec">Encrypted vault sync (Supabase)</div>
+      <div className="hd-sec">Vault sync (Supabase)</div>
       <div className="hd-card" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'stretch' }}>
         <div className="hd-form">
-          <label>Supabase URL<input className="hd-input" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://xyz.supabase.co" /></label>
-          <label>Anon key<input className="hd-input mono" type="password" value={anonKey} onChange={(e) => setAnonKey(e.target.value)} /></label>
+          {!status?.backendConfigured && <div style={{ fontSize: 12, color: 'var(--hd-muted)' }}>Sync is unavailable in this build.</div>}
           <div className="hd-row">
             <label>Email<input className="hd-input" value={email} onChange={(e) => setEmail(e.target.value)} /></label>
-            <label>Password<input className="hd-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
+            <label>Account password<input className="hd-input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} /></label>
           </div>
           <div className="hd-row" style={{ justifyContent: 'flex-end' }}>
-            <button className="hd-btn" type="button" disabled={busy} onClick={() => void save()}>Save</button>
-            <button className="hd-btn primary" type="button" disabled={busy} onClick={() => void syncNow()}>Sync now</button>
+            <button className="hd-btn" type="button" disabled={busy || !status?.backendConfigured || !email.trim() || !password} onClick={() => void save()}>Save account</button>
+            <button className="hd-btn primary" type="button" disabled={busy || !status?.configured || !status?.passwordsConfigured} onClick={() => void syncNow()}>Sync now</button>
           </div>
+        </div>
+        <div className="hd-form" style={{ marginTop: 16 }}>
+          <label>Sync encryption password<input className="hd-input" type="password" autoComplete="off" minLength={12} value={encryptionPassword} onChange={(e) => setEncryptionPassword(e.target.value)} placeholder={status?.passwordsConfigured ? 'Saved on this device' : 'At least 12 characters'} /></label>
+          <div style={{ fontSize: 12, color: 'var(--hd-muted)' }}>Use the same encryption password on every device. It encrypts host passwords, private keys and snippets before upload. Keep it safe: it cannot be recovered or changed after the first successful sync.</div>
+          <div className="hd-row" style={{ justifyContent: 'flex-end' }}><button className="hd-btn" type="button" disabled={busy || encryptionPassword.length < 12} onClick={() => void saveEncryptionPassword()}>Save encryption password</button></div>
         </div>
         <div style={{ fontSize: 12, color: 'var(--hd-muted)', marginTop: 8 }}>
           Status: {status ? `${status.configured ? 'configured' : 'not configured'} · last sync ${status.lastSyncAt}` : '…'}
-          {status?.lastError && <div style={{ color: 'var(--hd-danger)' }}>{status.lastError}</div>}
           {msg && <div>{msg}</div>}
         </div>
+        <ErrorNotice error={syncError || status?.lastError} context="Vault sync" onDismiss={() => { setSyncError(''); setStatus((previous) => previous ? { ...previous, lastError: null } : previous); }} />
       </div>
       <div className="hd-card" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'stretch' }}>
-        <h3 style={{ margin: '0 0 8px', fontSize: 13 }}>Security model (v0.0.1)</h3>
+        <h3 style={{ margin: '0 0 8px', fontSize: 13 }}>What syncs</h3>
         <div style={{ fontSize: 12, color: 'var(--hd-muted)' }}>
-          Private keys and passwords live only in the OS keychain on this device. Sync carries hosts, snippets and key
-          metadata (public parts); secrets never leave the machine. Apply <code>supabase/schema.sql</code> to your project first.
+          Host passwords, Keychain private keys with their passphrases, and Snippets sync with end-to-end encryption.
+          Received keys and snippets are ready to use on this device. Host metadata and public key details are not end-to-end encrypted.
         </div>
       </div>
     </div>

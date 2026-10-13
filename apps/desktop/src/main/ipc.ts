@@ -1,20 +1,41 @@
-import { BrowserWindow, dialog, ipcMain } from 'electron';
-import { copyFileSync, existsSync, readFileSync, rmSync } from 'fs';
-import { homedir } from 'os';
-import { basename, join } from 'path';
+import { handleIpc } from './handle-ipc';
+import { randomUUID } from 'node:crypto';
+import { BrowserWindow, dialog } from 'electron';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { planTermiusImport } from './termius-import';
+import { readTermiusProfile } from './termius-reader';
+import { detectRemoteOs } from './detect-os';
+import { basename, join, resolve } from 'path';
 import { SessionManager } from '@hopdock/ssh';
 import type { ConnectOpts } from '@hopdock/ssh';
-import { fingerprint, generateKeyFile } from '@hopdock/ssh';
+import { fingerprint, generateKeyFile, publicKeyFromPrivate } from '@hopdock/ssh';
 import { SyncEngine } from '@hopdock/sync';
-import type { ItemKind, VaultItem } from '@hopdock/sync';
-import { execFile } from 'child_process';
-import { deleteSecret, getSecret, keysDir, loadVault, saveVault, setSecret } from './store';
-import type { SaveHostInput } from '@hopdock/ui';
+import { deleteSecret, getSecret, hasSecret, keysDir, loadVault, saveVault, setSecret } from './store';
+import type { SaveHostInput, SyncCredsInput } from '@hopdock/ui';
+import { syncVault } from './sync-vault';
+import { keyFileStorage } from './key-files';
+import { supabaseUrl, supabasePublishableKey } from './backend-config';
+import { absoluteLocalPath, listLocalFiles, localPlaces } from './local-files';
+import { toPuttyPrivateKey } from './putty-key';
+import { findWinSCP, openWinSCP, validateWinSCP } from './winscp';
 
 const mgr = new SessionManager(() => undefined);
 const sync = new SyncEngine();
 let lastSyncError: string | null = null;
 let win: BrowserWindow | null = null;
+let syncBusy = false;
+let pendingKeyWrites = 0;
+
+async function mutateKeys<T>(operation: () => Promise<T>): Promise<T> {
+  requireSyncIdle();
+  pendingKeyWrites++;
+  try { return await operation(); }
+  finally { pendingKeyWrites--; }
+}
+
+function requireSyncIdle(): void {
+  if (syncBusy) throw new Error('Sync is in progress. Try again when it finishes.');
+}
 
 export function setWindow(w: BrowserWindow): void {
   win = w;
@@ -32,11 +53,14 @@ async function connectOptsFor(hostId: string): Promise<ConnectOpts> {
   const host = v.hosts.find((h) => h.id === hostId);
   if (!host) throw new Error(`unknown host: ${hostId}`);
   const opts: ConnectOpts = { host: host.host, port: host.port, username: host.username };
-  if (host.auth.type === 'password') {
+  if (host.auth.type === 'password' || host.auth.type === 'key-password') {
     const pw = getSecret(`pw:${host.id}`);
     if (!pw) throw new Error('no stored password for this host');
     opts.password = pw;
-  } else if (host.auth.type === 'key' || host.auth.type === 'cert') {
+  }
+  if (host.auth.type === 'cert') {
+    throw new Error('SSH certificate authentication is not supported yet.');
+  } else if (host.auth.type === 'key' || host.auth.type === 'key-password') {
     const key = v.keys.find((k) => k.id === host.auth.keyId);
     if (!key) throw new Error('referenced key not found');
     const path = join(keysDir(), key.id);
@@ -45,19 +69,85 @@ async function connectOptsFor(hostId: string): Promise<ConnectOpts> {
     const pp = getSecret(`pp:${key.id}`);
     if (pp) opts.passphrase = pp;
   } else if (host.auth.type === 'agent') {
-    if (process.env['SSH_AUTH_SOCK']) opts.agent = process.env['SSH_AUTH_SOCK'];
+    if (!process.env['SSH_AUTH_SOCK']) throw new Error('SSH agent is unavailable: SSH_AUTH_SOCK is not set.');
+    opts.agent = process.env['SSH_AUTH_SOCK'];
   }
   return opts;
 }
 
 export function registerIpc(): void {
-  ipcMain.handle('vault:get', () => {
+  handleIpc('files:pick', async (_e, title: string, options: { save?: boolean; multiple?: boolean; filename?: string } = {}) => {
+    if (!win) throw new Error('Application window is unavailable.');
+    if (options.save) {
+      const result = await dialog.showSaveDialog(win, { title, defaultPath: options.filename, properties: ['createDirectory', 'showOverwriteConfirmation'] });
+      return result.canceled || !result.filePath ? null : [result.filePath];
+    }
+    const result = await dialog.showOpenDialog(win, { title, properties: options.multiple ? ['openFile', 'multiSelections'] : ['openFile'] });
+    return result.canceled ? null : result.filePaths;
+  });
+  handleIpc('winscp:status', () => ({ supported: process.platform === 'win32', path: findWinSCP(getSecret('winscp:path')) }));
+  handleIpc('winscp:configure', (_e, path: string) => { if (path) validateWinSCP(path); setSecret('winscp:path', path); });
+  handleIpc('winscp:open', async (_e, id: string) => {
+    const v = vault(); const host = v.hosts.find((h) => h.id === id);
+    if (!host) throw new Error('Unknown host.');
+    await openWinSCP(host, await connectOptsFor(id), getSecret('winscp:path'));
+  });
+  handleIpc('files:places', () => localPlaces());
+  handleIpc('files:list', (_e, path: string) => listLocalFiles(path));
+  handleIpc('files:exists', (_e, path: string) => existsSync(absoluteLocalPath(path)));
+  handleIpc('vault:get', () => {
     const v = vault();
-    return { hosts: v.hosts, keys: v.keys, snippets: v.snippets };
+    return { hosts: v.hosts, groups: v.groups, keys: v.keys, snippets: v.snippets };
+  });
+  handleIpc('vault:readHostPassword', (_e, id: string) => {
+    if (!vault().hosts.some((host) => host.id === id)) throw new Error('unknown host');
+    const password = getSecret(`pw:${id}`);
+    if (password === null) throw new Error('No stored password.');
+    return password;
   });
 
-  ipcMain.handle('vault:saveHost', (_e, input: SaveHostInput, id?: string) => {
+  handleIpc('vault:saveGroup', (_e, name: string) => {
+    requireSyncIdle();
+    if (typeof name !== 'string' || !name.trim()) throw new Error('Group name is required.');
     const v = vault();
+    const existing = v.groups.find((g) => g.name.toLowerCase() === name.trim().toLowerCase());
+    if (existing) return existing;
+    const group = { id: `g-${randomUUID()}`, vaultId: 'v-personal', name: name.trim(), sort: v.groups.length, updatedAt: new Date().toISOString() };
+    v.groups.push(group); saveVault(v); return group;
+  });
+  handleIpc('vault:importTermius', async () => {
+    requireSyncIdle();
+    if (pendingKeyWrites) throw new Error('Wait for key generation or import to finish before syncing.');
+    const json = await readTermiusProfile();
+    requireSyncIdle();
+    if (pendingKeyWrites) throw new Error('Wait for key generation or import to finish before syncing.');
+    const plan = planTermiusImport(json, vault());
+    const files = keyFileStorage(keysDir());
+    const writtenKeys: string[] = [], writtenSecrets: string[] = [];
+    try {
+      for (const [id, material] of plan.keyWrites) {
+        if (existsSync(files.path(id))) throw new Error('Termius import key file already exists.');
+        files.write(id, material); writtenKeys.push(id);
+        plan.vault.keys.find((key) => key.id === id)!.privateRef = files.path(id);
+      }
+      for (const [key, value] of plan.secretWrites) {
+        if (hasSecret(key)) throw new Error('Termius import secret already exists.');
+        setSecret(key, value); writtenSecrets.push(key);
+      }
+      saveVault(plan.vault); return plan.result;
+    } catch (error) {
+      for (const key of writtenSecrets) deleteSecret(key);
+      for (const id of writtenKeys) files.delete(id);
+      throw error;
+    }
+  });
+
+  handleIpc('vault:saveHost', (_e, input: SaveHostInput, id?: string) => {
+    requireSyncIdle();
+    const v = vault();
+    if (input.groupId && !v.groups.some((group) => group.id === input.groupId)) throw new Error('unknown group');
+    if ((input.auth.type === 'key' || input.auth.type === 'key-password') && !v.keys.some((key) => key.id === input.auth.keyId)) throw new Error('Select a key from Keychain.');
+    if ((input.auth.type === 'password' || input.auth.type === 'key-password') && !input.password && !(id && getSecret(`pw:${id}`))) throw new Error('Password is required.');
     const tags = input.tags;
     if (id) {
       const i = v.hosts.findIndex((h) => h.id === id);
@@ -66,6 +156,8 @@ export function registerIpc(): void {
       if (!prev) throw new Error('unknown host');
       v.hosts[i] = {
         ...prev,
+        os: prev.host === input.host && prev.port === input.port ? prev.os : undefined,
+        groupId: input.groupId === undefined ? prev.groupId : input.groupId,
         name: input.name,
         host: input.host,
         port: input.port,
@@ -74,7 +166,8 @@ export function registerIpc(): void {
         tags,
         updatedAt: new Date().toISOString(),
       };
-      if (input.password) setSecret(`pw:${id}`, input.password);
+      if (input.auth.type !== 'password' && input.auth.type !== 'key-password') deleteSecret(`pw:${id}`);
+      else if (input.password) setSecret(`pw:${id}`, input.password);
       saveVault(v);
       const saved = v.hosts[i];
       if (!saved) throw new Error('unknown host');
@@ -83,7 +176,7 @@ export function registerIpc(): void {
     const host = {
       id: `h-${Date.now()}`,
       vaultId: 'v-personal',
-      groupId: v.groups[0]?.id ?? null,
+      groupId: input.groupId ?? null,
       name: input.name,
       host: input.host,
       port: input.port,
@@ -102,49 +195,78 @@ export function registerIpc(): void {
     return host;
   });
 
-  ipcMain.handle('vault:deleteHost', (_e, id: string) => {
+  handleIpc('vault:deleteHost', (_e, id: string) => {
+    requireSyncIdle();
     const v = vault();
+    const host = v.hosts.find((h) => h.id === id);
+    if (host) (v.deletedHosts ??= []).push({ ...host, updatedAt: new Date().toISOString() });
     v.hosts = v.hosts.filter((h) => h.id !== id);
     deleteSecret(`pw:${id}`);
     saveVault(v);
   });
 
-  ipcMain.handle('vault:setSecret', (_e, key: string, value: string) => setSecret(key, value));
+  handleIpc('vault:setSecret', (_e, key: string, value: string) => {
+    requireSyncIdle();
+    setSecret(key, value);
+    if (key.startsWith('pw:')) {
+      const v = vault();
+      const host = v.hosts.find((h) => `pw:${h.id}` === key);
+      if (host) { host.updatedAt = new Date().toISOString(); saveVault(v); }
+    } else if (key.startsWith('pp:')) {
+      const v = vault();
+      const entry = v.keys.find((k) => `pp:${k.id}` === key);
+      if (entry) { entry.updatedAt = new Date().toISOString(); saveVault(v); }
+    }
+  });
 
-  ipcMain.handle('ssh:connect', async (_e, hostId: string, cols?: number, rows?: number) => {
+  handleIpc('ssh:connect', async (_e, hostId: string, cols?: number, rows?: number, purpose?: 'sftp') => {
     const opts = await connectOptsFor(hostId);
-    await mgr.connect(hostId, opts, cols ?? 80, rows ?? 24);
-    return hostId;
+    const sessionId = purpose === 'sftp' ? `sftp:${hostId}` : hostId;
+    await mgr.connect(sessionId, opts, cols ?? 80, rows ?? 24);
+    const connection = mgr.sessionIdentity(sessionId);
+    void detectRemoteOs((command) => mgr.exec(sessionId, command, { timeoutMs: 1800, maxOutputBytes: 16384 }), mgr.banner(sessionId)).then((os) => {
+      const persist = () => {
+      if (!os || mgr.sessionIdentity(sessionId) !== connection) return;
+      if (syncBusy) { setTimeout(persist, 250).unref(); return; }
+      const data = vault();
+      const host = data.hosts.find((host) => host.id === hostId);
+      if (!host || host.host !== opts.host || host.port !== opts.port || host.username !== opts.username) return;
+      host.os = os; host.updatedAt = new Date().toISOString(); saveVault(data);
+      if (win && !win.isDestroyed()) win.webContents.send('vault:hostUpdated', host);
+      };
+      persist();
+    }).catch(() => { /* OS detection is optional and never breaks an established session. */ });
+    return sessionId;
   });
-  ipcMain.handle('ssh:write', (_e, id: string, dataB64: string) => mgr.write(id, dataB64));
-  ipcMain.handle('ssh:resize', (_e, id: string, cols: number, rows: number) => mgr.resize(id, cols, rows));
-  ipcMain.handle('ssh:exec', (_e, id: string, command: string) => mgr.exec(id, command));
-  ipcMain.handle('ssh:close', (_e, id: string) => mgr.close(id));
+  handleIpc('ssh:write', (_e, id: string, dataB64: string) => mgr.write(id, dataB64));
+  handleIpc('ssh:resize', (_e, id: string, cols: number, rows: number) => mgr.resize(id, cols, rows));
+  handleIpc('ssh:exec', (_e, id: string, command: string) => mgr.exec(id, command));
+  handleIpc('ssh:close', (_e, id: string) => mgr.close(id));
 
-  ipcMain.handle('sftp:list', (_e, id: string, path: string) => mgr.list(id, path));
-  ipcMain.handle('sftp:downloadTo', async (_e, id: string, remotePath: string) => {
-    const picked = await dialog.showSaveDialog({ defaultPath: join(homedir(), 'Downloads', basename(remotePath)) });
-    if (picked.canceled || !picked.filePath) return null;
-    await mgr.download(id, remotePath, picked.filePath);
-    return picked.filePath;
+  handleIpc('sftp:list', (_e, id: string, path: string) => mgr.list(id, path));
+  handleIpc('sftp:realpath', (_e, id: string, path: string) => mgr.realpath(id, path));
+  handleIpc('sftp:downloadTo', async (_e, id: string, remotePath: string, selectedPath: string) => {
+    const localPath = absoluteLocalPath(selectedPath);
+    await mgr.download(id, remotePath, localPath);
+    return localPath;
   });
-  ipcMain.handle('sftp:uploadFrom', async (_e, id: string, remoteDir: string) => {
-    const picked = await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'] });
-    if (picked.canceled || picked.filePaths.length === 0) return null;
+  handleIpc('sftp:uploadFrom', async (_e, id: string, remoteDir: string, selectedPaths: string[]) => {
+    if (!Array.isArray(selectedPaths) || !selectedPaths.length) return null;
     let last: string | null = null;
-    for (const local of picked.filePaths) {
+    for (const selected of selectedPaths) {
+      const local = absoluteLocalPath(selected);
       await mgr.upload(id, local, `${remoteDir.replace(/\/$/, '')}/${basename(local)}`);
       last = local;
     }
     return last;
   });
-  ipcMain.handle('sftp:mkdir', (_e, id: string, path: string) => mgr.mkdir(id, path));
-  ipcMain.handle('sftp:remove', (_e, id: string, path: string, recursive: boolean) => mgr.remove(id, path, recursive));
-  ipcMain.handle('sftp:rename', (_e, id: string, from: string, to: string) => mgr.rename(id, from, to));
-  ipcMain.handle('sftp:chmod', (_e, id: string, path: string, mode: number) => mgr.chmod(id, path, mode));
-  ipcMain.handle('sftp:copy', (_e, id: string, from: string, to: string) => mgr.copy(id, from, to));
+  handleIpc('sftp:mkdir', (_e, id: string, path: string) => mgr.mkdir(id, path));
+  handleIpc('sftp:remove', (_e, id: string, path: string, recursive: boolean) => mgr.remove(id, path, recursive));
+  handleIpc('sftp:rename', (_e, id: string, from: string, to: string) => mgr.rename(id, from, to));
+  handleIpc('sftp:chmod', (_e, id: string, path: string, mode: number) => mgr.chmod(id, path, mode));
+  handleIpc('sftp:copy', (_e, id: string, from: string, to: string) => mgr.copy(id, from, to));
 
-  ipcMain.handle('keys:generate', async (_e, name: string, kind: 'ed25519' | 'rsa', passphrase: string) => {
+  handleIpc('keys:generate', async (_e, name: string, kind: 'ed25519' | 'rsa', passphrase: string) => mutateKeys(async () => {
     const id = `k-${Date.now()}`;
     const path = join(keysDir(), id);
     const { publicKey } = await generateKeyFile(path, kind, passphrase, `hopdock-${name}`);
@@ -163,24 +285,52 @@ export function registerIpc(): void {
     v.keys.push(key);
     saveVault(v);
     return key;
+  }));
+
+  handleIpc('keys:read', (_e, id: string) => {
+    const key = vault().keys.find((entry) => entry.id === id);
+    if (!key) throw new Error('Unknown key.');
+    const material = keyFileStorage(keysDir()).read(key.id);
+    if (material === null) throw new Error('Private key is not available on this device. Sync your vault first.');
+    return { privateKey: material, passphrase: getSecret(`pp:${key.id}`) ?? '' };
+  });
+  handleIpc('keys:update', async (_e, id: string, input: { name: string; privateKey: string; passphrase: string }) => mutateKeys(async () => {
+    if (!input.name?.trim()) throw new Error('Key name is required.');
+    const v = vault(); const index = v.keys.findIndex((entry) => entry.id === id);
+    const key = v.keys[index]; if (!key) throw new Error('Unknown key.');
+    const parsed = publicKeyFromPrivate(input.privateKey, input.passphrase || undefined);
+    keyFileStorage(keysDir()).write(key.id, input.privateKey);
+    if (input.passphrase) setSecret(`pp:${key.id}`, input.passphrase); else deleteSecret(`pp:${key.id}`);
+    const updated = { ...key, name: input.name.trim(), publicKey: parsed.publicKey, kind: parsed.kind, fingerprint: fingerprint(parsed.publicKey), updatedAt: new Date().toISOString() };
+    v.keys[index] = updated; saveVault(v); return updated;
+  }));
+  handleIpc('keys:export', (_e, id: string, selectedPath: string, format: 'original' | 'ppk') => {
+    const key = vault().keys.find((entry) => entry.id === id);
+    if (!key) throw new Error('Unknown key.');
+    if (format !== 'original' && format !== 'ppk') throw new Error('Unsupported export format.');
+    const material = keyFileStorage(keysDir()).read(key.id);
+    if (material === null) throw new Error('Private key is not available on this device.');
+    const target = absoluteLocalPath(selectedPath);
+    const managedDirectory = resolve(keysDir()).toLowerCase(); const exportPath = resolve(target).toLowerCase();
+    if (exportPath === managedDirectory || exportPath.startsWith(managedDirectory + '\\') || exportPath.startsWith(managedDirectory + '/')) throw new Error('Choose an export destination outside the managed Keychain folder.');
+    const content = format === 'original' ? material : toPuttyPrivateKey(material, getSecret(`pp:${key.id}`) ?? '', key.name);
+    writeFileSync(target, content, { mode: 0o600 });
+    return target;
   });
 
-  ipcMain.handle('keys:import', async (_e, name: string) => {
-    const picked = await dialog.showOpenDialog({ properties: ['openFile'] });
-    if (picked.canceled || picked.filePaths.length === 0) return null;
-    const src = picked.filePaths[0];
-    if (!src) return null;
+  handleIpc('keys:import', async (_e, name: string, passphrase: string | undefined, selectedPath: string) => mutateKeys(async () => {
+    const src = absoluteLocalPath(selectedPath);
     const id = `k-${Date.now()}`;
     const dest = join(keysDir(), id);
-    copyFileSync(src, dest);
-    const pub = await new Promise<string>((resolve, reject) => {
-      execFile('ssh-keygen', ['-y', '-f', dest], (err, stdout) => (err ? reject(err) : resolve(stdout.trim())));
-    });
+    const material = readFileSync(src, 'utf8');
+    const { publicKey: pub, kind } = publicKeyFromPrivate(material, passphrase);
+    keyFileStorage(keysDir()).write(id, material);
+    if (passphrase) setSecret(`pp:${id}`, passphrase);
     const key = {
       id,
       vaultId: 'v-personal',
       name,
-      kind: (/^ssh-ed25519/.test(pub) || /^sk-ssh-ed25519/.test(pub) ? 'Ed25519' : 'RSA') as 'Ed25519' | 'RSA',
+      kind,
       fingerprint: fingerprint(pub),
       publicKey: pub,
       privateRef: dest,
@@ -190,17 +340,21 @@ export function registerIpc(): void {
     v.keys.push(key);
     saveVault(v);
     return key;
-  });
+  }));
 
-  ipcMain.handle('keys:delete', async (_e, id: string) => {
+  handleIpc('keys:delete', async (_e, id: string) => {
+    requireSyncIdle();
     const v = vault();
+    const key = v.keys.find((k) => k.id === id);
+    if (key) (v.deletedKeys ??= []).push({ id: key.id, vaultId: key.vaultId, updatedAt: new Date().toISOString() });
     v.keys = v.keys.filter((k) => k.id !== id);
     saveVault(v);
     deleteSecret(`pp:${id}`);
     rmSync(join(keysDir(), id), { force: true });
+    rmSync(join(keysDir(), `${id}.pub`), { force: true });
   });
 
-  ipcMain.handle('keys:copyId', async (_e, keyId: string, hostId: string) => {
+  handleIpc('keys:copyId', async (_e, keyId: string, hostId: string) => {
     const v = vault();
     const key = v.keys.find((k) => k.id === keyId);
     if (!key) throw new Error('unknown key');
@@ -216,7 +370,7 @@ export function registerIpc(): void {
     }
   });
 
-  ipcMain.handle('snippets:run', async (_e, snippetId: string, hostId: string, vars: Record<string, string>) => {
+  handleIpc('snippets:run', async (_e, snippetId: string, hostId: string, vars: Record<string, string>) => {
     const v = vault();
     const snip = v.snippets.find((s) => s.id === snippetId);
     if (!snip) throw new Error('unknown snippet');
@@ -230,7 +384,8 @@ export function registerIpc(): void {
     }
   });
 
-  ipcMain.handle('snippets:save', (_e, input: { name: string; folder: string; script: string }, id?: string) => {
+  handleIpc('snippets:save', (_e, input: { name: string; folder: string; script: string }, id?: string) => {
+    requireSyncIdle();
     const v = vault();
     if (id) {
       const i = v.snippets.findIndex((s) => s.id === id);
@@ -264,75 +419,82 @@ export function registerIpc(): void {
     return snip;
   });
 
-  ipcMain.handle('snippets:remove', (_e, id: string) => {
+  handleIpc('snippets:remove', (_e, id: string) => {
+    requireSyncIdle();
     const v = vault();
+    const snippet = v.snippets.find((s) => s.id === id);
+    if (snippet) (v.deletedSnippets ??= []).push({ id: snippet.id, vaultId: snippet.vaultId, updatedAt: new Date().toISOString() });
     v.snippets = v.snippets.filter((s) => s.id !== id);
     saveVault(v);
   });
 
-  ipcMain.handle('sync:status', () => ({
-    configured: sync.configured,
+  handleIpc('sync:status', () => ({
+    configured: !!(supabaseUrl && supabasePublishableKey && getSecret('sync:email') && getSecret('sync:pass')),
+    backendConfigured: !!(supabaseUrl && supabasePublishableKey),
+    projectUrl: supabaseUrl,
     lastSyncAt: vault().lastSyncAt,
     lastError: lastSyncError,
+    passwordsConfigured: !!getSecret('sync:encryptionPassword'),
   }));
 
-  ipcMain.handle('sync:saveCreds', (_e, creds: { url: string; anonKey: string; email: string; password: string }) => {
-    setSecret('sync:url', creds.url);
-    setSecret('sync:key', creds.anonKey);
-    setSecret('sync:email', creds.email);
-    setSecret('sync:pass', creds.password);
-    sync.configure(creds);
+  handleIpc('sync:setEncryptionPassword', (_e, passphrase: string) => {
+    requireSyncIdle();
+    if (typeof passphrase !== 'string' || passphrase.length < 12) throw new Error('Use at least 12 characters for the sync encryption password.');
+    const previous = getSecret('sync:encryptionPassword');
+    if (previous && previous !== passphrase && vault().passwordSyncVersion === 1) {
+      throw new Error('The encryption password is already in use. Keep the same password on all devices.');
+    }
+    setSecret('sync:encryptionPassword', passphrase);
   });
 
-  ipcMain.handle('sync:now', async () => {
+  handleIpc('sync:saveCreds', (_e, creds: SyncCredsInput) => {
+    requireSyncIdle();
+    if (!supabaseUrl || !supabasePublishableKey) throw new Error('This build has no Supabase configuration.');
+    if (!creds.email?.trim() || !creds.password) throw new Error('Enter your account email and password.');
+    if (getSecret('sync:url') !== supabaseUrl || getSecret('sync:email') !== creds.email) {
+      const v = vault();
+      delete v.passwordSyncVersion;
+      delete v.contentSyncVersion;
+      v.lastSyncAt = new Date(0).toISOString();
+      saveVault(v);
+    }
+    setSecret('sync:url', supabaseUrl);
+    deleteSecret('sync:key');
+    setSecret('sync:email', creds.email);
+    setSecret('sync:pass', creds.password);
+    sync.configure({ url: supabaseUrl, anonKey: supabasePublishableKey, email: creds.email, password: creds.password });
+  });
+
+  handleIpc('sync:now', async () => {
+    requireSyncIdle();
+    if (pendingKeyWrites) throw new Error('Wait for key generation or import to finish before syncing.');
     if (!sync.configured) {
-      const url = getSecret('sync:url');
-      const anonKey = getSecret('sync:key');
       const email = getSecret('sync:email');
       const password = getSecret('sync:pass');
-      if (!url || !anonKey) throw new Error('sync not configured — fill Settings first');
-      sync.configure({ url, anonKey, email: email ?? '', password: password ?? '' });
+      if (!supabaseUrl || !supabasePublishableKey) throw new Error('This build has no Supabase configuration.');
+      if (!email || !password) throw new Error('Sign in to sync in Settings first.');
+      if (getSecret('sync:url') !== supabaseUrl) {
+        const v = vault();
+        delete v.passwordSyncVersion;
+        delete v.contentSyncVersion;
+        v.lastSyncAt = new Date(0).toISOString();
+        saveVault(v);
+        setSecret('sync:url', supabaseUrl);
+      }
+      sync.configure({ url: supabaseUrl, anonKey: supabasePublishableKey, email, password });
     }
     const v = vault();
     lastSyncError = null;
+    syncBusy = true;
     try {
-      const since = v.lastSyncAt;
-      const pushItems: VaultItem[] = [
-        ...v.hosts.filter((h) => h.updatedAt > since).map((h) => {
-          const { ...rest } = h;
-          void rest;
-          return { id: h.id, vault_id: h.vaultId, kind: 'host' as ItemKind, data: h, updated_at: h.updatedAt };
-        }),
-        ...v.groups.filter((g) => since === new Date(0).toISOString()).map((g) => ({ id: g.id, vault_id: g.vaultId, kind: 'group' as ItemKind, data: g, updated_at: new Date().toISOString() })),
-        ...v.keys.map((k) => {
-          const { privateRef, ...pub } = k;
-          void privateRef;
-          return { id: k.id, vault_id: k.vaultId, kind: 'key' as ItemKind, data: pub, updated_at: k.updatedAt };
-        }),
-        ...v.snippets.map((s) => ({ id: s.id, vault_id: s.vaultId, kind: 'snippet' as ItemKind, data: s, updated_at: s.updatedAt })),
-      ].filter((i) => i.updated_at > since);
-      const pushed = await sync.push(pushItems);
-      const pulled = await sync.pull(since);
-      for (const item of pulled) {
-        if (item.kind === 'host') {
-          const h = item.data as (typeof v.hosts)[number];
-          const i = v.hosts.findIndex((x) => x.id === h.id);
-          if (i >= 0) v.hosts[i] = h;
-          else v.hosts.push(h);
-        } else if (item.kind === 'snippet') {
-          const s = item.data as (typeof v.snippets)[number];
-          const i = v.snippets.findIndex((x) => x.id === s.id);
-          if (i >= 0) v.snippets[i] = s;
-          else v.snippets.push(s);
-        }
-        // groups/keys merge by id the same way; key private material stays local-only
-      }
-      v.lastSyncAt = new Date().toISOString();
-      saveVault(v);
-      return { pushed, pulled: pulled.length };
+      const result = await syncVault(v, sync, { get: getSecret, set: setSecret, delete: deleteSecret }, getSecret('sync:encryptionPassword') ?? '', keyFileStorage(keysDir()));
+      saveVault(result.vault);
+      return { pushed: result.pushed, pulled: result.pulled };
     } catch (err) {
       lastSyncError = String(err);
       throw err;
+    } finally {
+      syncBusy = false;
     }
   });
 }

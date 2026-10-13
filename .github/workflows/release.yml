@@ -9,19 +9,32 @@ on:
 permissions:
   contents: write
 
+env:
+  SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+  SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+  SUPABASE_REQUIRE_CONFIG: '1'
+
 jobs:
-  # Create the release FIRST so parallel matrix jobs only upload into it.
-  # (electron-builder races getOrCreateRelease and forks duplicate releases.)
+  # Build into a draft; make it visible to the updater only after all assets exist.
   prepare:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - name: verify release version
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          VERSION=$(node -p "require('./apps/desktop/package.json').version")
+          test "$TAG" = "v$VERSION" || { echo "Tag and app version must match"; exit 1; }
       - name: create release if missing
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF#refs/tags/}"
-          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "Hopdock $TAG" --draft=false --prerelease=false
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            DRAFT=$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)
+            test "$DRAFT" = true || { echo "Refusing to overwrite a published release"; exit 1; }
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --notes "Hopdock $TAG" --draft --prerelease=false
           fi
 
   dist:
@@ -32,6 +45,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -42,7 +58,18 @@ jobs:
       - name: dist (publish GitHub Release)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run dist:publish --workspace apps/desktop
+        run: npm run dist:publish --workspace apps/desktop -- '--config.publish.releaseType=draft'
       - name: smoke (headless launch check, linux only)
         if: matrix.os == 'ubuntu-latest'
         run: xvfb-run -a ./apps/desktop/dist/linux-unpacked/hopdock-desktop --no-sandbox --hopdock-smoke
+
+  publish:
+    needs: dist
+    runs-on: ubuntu-latest
+    steps:
+      - name: publish complete release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest

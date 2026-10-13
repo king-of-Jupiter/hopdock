@@ -1,5 +1,7 @@
 import type { Host } from '@hopdock/core';
-import { osTile } from './os';
+import type { ReactNode } from 'react';
+import { OsIcon } from './OsIcon';
+import { Icons } from './icons';
 
 export type Tab =
   | { kind: 'vaults' }
@@ -11,45 +13,45 @@ interface Props {
   active: number;
   onPick: (i: number) => void;
   onCloseSession: (hostId: string) => void;
+  leading?: ReactNode;
+  trailing?: ReactNode;
 }
 
-export function TopTabs({ tabs, active, onPick, onCloseSession }: Props) {
+export function TopTabs({ tabs, active, onPick, onCloseSession, leading, trailing }: Props) {
   return (
     <div className="hd-tabs">
+      {leading}
       {tabs.map((t, i) => {
         if (t.kind === 'vaults') {
           return (
             <button key="vaults" type="button" className={'hd-pill' + (i === active ? ' active' : '')} onClick={() => onPick(i)}>
-              ▣ Vaults
+              <Icons.hosts /> Vaults
             </button>
           );
         }
         if (t.kind === 'sftp') {
           return (
             <button key="sftp" type="button" className={'hd-pill' + (i === active ? ' active' : '')} onClick={() => onPick(i)}>
-              ▤ SFTP
+              <Icons.folder /> SFTP
             </button>
           );
         }
-        const tile = osTile(t.host);
         return (
-          <button key={t.host.id} type="button" className={'hd-pill' + (i === active ? ' active' : '')} onClick={() => onPick(i)}>
-            <span className="hd-tile sm" style={{ background: tile.color }}>
-              {tile.glyph}
-            </span>
-            {t.host.name}
-            <span
+          <div key={t.host.id} className={'hd-pill hd-session-pill' + (i === active ? ' active' : '')}>
+            <button className="hd-tab-select" type="button" onClick={() => onPick(i)}><OsIcon host={t.host} small />{t.host.name}</button>
+            <button type="button" aria-label={`Close ${t.host.name}`}
               className="x"
               onClick={(e) => {
                 e.stopPropagation();
                 onCloseSession(t.host.id);
               }}
             >
-              ×
-            </span>
-          </button>
+              <Icons.close />
+            </button>
+          </div>
         );
       })}
+      {trailing}
     </div>
   );
 }

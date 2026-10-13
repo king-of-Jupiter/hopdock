@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react';
 import type { Host, Snippet } from '@hopdock/core';
+import { confirmAction } from './TextPrompt';
+import { ErrorNotice } from './ErrorNotice';
+import { Drawer } from './Drawer';
 
 interface Props {
   snippets: Snippet[];
@@ -22,6 +25,7 @@ export function SnippetsView({ snippets, hosts, onChanged }: Props) {
   const saveSnippet = async () => {
     if (!editing || !editing.name.trim() || !editing.script.trim()) return;
     setBusy(true);
+    setErr('');
     try {
       await window.hopdock.snippets.save({ name: editing.name.trim(), folder: editing.folder.trim() || 'general', script: editing.script }, editing.id);
       setEditing(null);
@@ -41,6 +45,7 @@ export function SnippetsView({ snippets, hosts, onChanged }: Props) {
     setErr('');
     try {
       const r = await window.hopdock.snippets.run(s.id, targetId, varValues[s.id] ?? {});
+      if (r.code !== 0) setErr('Snippet exited with non-zero status.');
       setResult({ name: s.name, out: `$ exit ${r.code}\n--- stdout ---\n${r.stdout}\n--- stderr ---\n${r.stderr}` });
     } catch (e) {
       setErr(String(e));
@@ -66,8 +71,8 @@ export function SnippetsView({ snippets, hosts, onChanged }: Props) {
             <option key={h.id} value={h.id}>{h.name} ({h.username}@{h.host})</option>
           ))}
         </select>
-        {err && <span style={{ color: 'var(--hd-danger)', fontSize: 12 }}>{err}</span>}
       </div>
+      {!editing && <ErrorNotice error={err} context="Snippet operation" onDismiss={() => setErr('')} />}
       {list.length === 0 ? (
         <div className="hd-empty" data-testid="snippets-empty">
           <h2>No snippets here</h2>
@@ -107,7 +112,7 @@ export function SnippetsView({ snippets, hosts, onChanged }: Props) {
                   <button className="hd-btn" type="button" disabled={busy} onClick={() => setEditing({ id: s.id, name: s.name, folder: s.folder, script: s.script })}>
                     Edit
                   </button>{' '}
-                  <button className="hd-btn" type="button" disabled={busy} onClick={() => { if (window.confirm(`Delete ${s.name}?`)) void window.hopdock.snippets.remove(s.id).then(() => onChanged()); }}>
+                  <button className="hd-btn" type="button" disabled={busy} onClick={() => { void confirmAction(`Delete ${s.name}?`, 'The snippet will be removed from this library and synced devices.').then(async (yes) => { if (yes) { try { await window.hopdock.snippets.remove(s.id); onChanged(); } catch (error) { setErr(String(error)); } } }); }}>
                     Delete
                   </button>
                 </td>
@@ -118,27 +123,19 @@ export function SnippetsView({ snippets, hosts, onChanged }: Props) {
       </div>
       )}
       {result && (
-        <div className="hd-modal" style={{ marginTop: 12 }}>
-          <h2>{result.name}</h2>
+        <Drawer title={result.name} eyebrow="COMMAND OUTPUT" onClose={() => setResult(null)} footer={<button className="hd-btn" type="button" onClick={() => setResult(null)}>Close</button>}>
           <pre>{result.out}</pre>
-          <button className="hd-btn" type="button" onClick={() => setResult(null)}>Close</button>
-        </div>
+        </Drawer>
       )}
       {editing && (
-        <div className="hd-overlay" onClick={() => setEditing(null)}>
-          <div className="hd-modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{editing.id ? 'Edit snippet' : 'New snippet'}</h2>
+        <Drawer title={editing.id ? 'Edit snippet' : 'New snippet'} eyebrow="SNIPPETS" busy={busy} onClose={() => setEditing(null)} onSubmit={() => void saveSnippet()} footer={<><button className="hd-btn" type="button" disabled={busy} onClick={() => setEditing(null)}>Cancel</button><button className="hd-btn primary" type="submit" disabled={busy || !editing.name.trim() || !editing.script.trim()}>Save</button></>}>
             <div className="hd-form">
               <label>Name<input className="hd-input" value={editing.name} onChange={(e) => setEditing({ ...editing, name: e.target.value })} /></label>
               <label>Folder<input className="hd-input" value={editing.folder} onChange={(e) => setEditing({ ...editing, folder: e.target.value })} /></label>
               <label>Script (use ${`{var}`} for inputs)<textarea className="hd-input mono" rows={5} value={editing.script} onChange={(e) => setEditing({ ...editing, script: e.target.value })} /></label>
-              <div className="hd-row" style={{ justifyContent: 'flex-end' }}>
-                <button className="hd-btn" type="button" onClick={() => setEditing(null)}>Cancel</button>
-                <button className="hd-btn primary" type="button" disabled={busy} onClick={() => void saveSnippet()}>Save</button>
-              </div>
+              <ErrorNotice error={err} context="Save snippet" onDismiss={() => setErr('')} />
             </div>
-          </div>
-        </div>
+        </Drawer>
       )}
     </>
   );

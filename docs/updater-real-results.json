@@ -1,0 +1,29 @@
+{
+  "checks": [
+    {
+      "name": "Published GitHub feed, current version",
+      "status": {
+        "state": "up-to-date",
+        "version": "0.0.6",
+        "checkedAt": "2026-10-13T00:09:37.038Z",
+        "revision": 3
+      }
+    },
+    {
+      "name": "Older version receives and verifies the real NSIS installer",
+      "status": {
+        "state": "downloaded",
+        "version": "0.0.6",
+        "percent": 100,
+        "checkedAt": "2026-10-13T00:09:50.489Z",
+        "revision": 17
+      },
+      "bytes": 82657745
+    }
+  ],
+  "installer": {
+    "silent": true,
+    "relaunch": true,
+    "interceptedForIsolation": true
+  }
+}

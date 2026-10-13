@@ -1,5 +1,15 @@
 node_modules
 out
 dist
+dist-branding
+.termius-reader-venv/
+.termius-reader-build/
+__pycache__/
+*.pyc
+apps/desktop/resources/termius-reader/
 *.local
+.env
+.env.*
+!.env.example
 .DS_Store
+docs/*.log

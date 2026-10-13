@@ -5,6 +5,8 @@ export type RailView = 'hosts' | 'keys' | 'snippets' | 'settings';
 interface Props {
   view: RailView;
   onView: (v: RailView) => void;
+  theme: 'dark' | 'light';
+  onTheme: (theme: 'dark' | 'light') => void;
 }
 
 const ITEMS: Array<{ id: RailView | 'portforward' | 'known' | 'history'; label: string; icon: () => React.JSX.Element; soon?: boolean }> = [
@@ -16,10 +18,11 @@ const ITEMS: Array<{ id: RailView | 'portforward' | 'known' | 'history'; label: 
   { id: 'history', label: 'History', icon: Icons.clock, soon: true },
 ];
 
-export function RailNav({ view, onView }: Props) {
+export function RailNav({ view, onView, theme, onTheme }: Props) {
   return (
     <nav className="hd-rail" aria-label="Sections">
-      {ITEMS.map((it) => {
+      <div className="hd-brand"><img className="hd-brand-mark" src={new URL('./assets/hopdock-mark.svg', import.meta.url).href} alt="" aria-hidden="true" /><span>Hopdock</span></div>
+      {ITEMS.filter((it) => !it.soon).map((it) => {
         const Icon = it.icon;
         return (
           <button
@@ -48,6 +51,10 @@ export function RailNav({ view, onView }: Props) {
           </span>
           Settings
         </button>
+      </div>
+      <div className="hd-theme-switch" aria-label="Color theme">
+        <button type="button" aria-pressed={theme === 'light'} onClick={() => onTheme('light')}><Icons.sun />Light</button>
+        <button type="button" aria-pressed={theme === 'dark'} onClick={() => onTheme('dark')}><Icons.moon />Dark</button>
       </div>
     </nav>
   );

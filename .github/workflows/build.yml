@@ -6,6 +6,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+  SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+
 jobs:
   qa:
     runs-on: ubuntu-latest
@@ -18,9 +22,11 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run test:ssh
+      - run: npx tsx --test packages/core/src/errors.test.ts apps/desktop/build-supabase.test.ts apps/desktop/src/main/password-sync.test.ts apps/desktop/src/main/putty-key.test.ts apps/desktop/src/main/update-controller.test.ts
       - run: npx playwright install --with-deps chromium
       - run: npm run build --workspace apps/desktop
       - run: npm run test:ui
+      - run: xvfb-run -a npm run test:desktop
 
   dist:
     strategy:
@@ -29,6 +35,9 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
       - uses: actions/setup-node@v4
         with:
           node-version: 22

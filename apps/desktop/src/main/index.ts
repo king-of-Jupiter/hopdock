@@ -2,20 +2,27 @@ import { app, BrowserWindow } from 'electron';
 import { join } from 'path';
 import { registerIpc, setWindow } from './ipc';
 import { checkOnStartup, setupAutoUpdater } from './updater';
+import { cleanupWinSCP } from './winscp';
+let ipcRegistered = false;
 
 function createWindow(): void {
   const win = new BrowserWindow({
     width: 1360,
     height: 860,
     autoHideMenuBar: true,
-    backgroundColor: '#0d1117',
+    backgroundColor: '#faf9f5',
+    icon: join(__dirname, '../renderer/app-icon.png'),
     webPreferences: {
-      preload: join(__dirname, '../preload/index.mjs'),
+      preload: join(__dirname, '../preload/index.cjs'),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
     },
   });
+  win.removeMenu();
   setWindow(win);
-  registerIpc();
-  setupAutoUpdater((channel, payload) => win.webContents.send(channel, payload));
+  if (!ipcRegistered) { registerIpc(); ipcRegistered = true; }
+  setupAutoUpdater((channel, payload) => { if (!win.isDestroyed()) win.webContents.send(channel, payload); });
   checkOnStartup();
 
   const url = process.env['ELECTRON_RENDERER_URL'];
@@ -42,3 +49,4 @@ void app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
 });
+app.on('will-quit', cleanupWinSCP);

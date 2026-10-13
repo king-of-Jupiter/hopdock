@@ -4,7 +4,7 @@
 import { spawn } from 'child_process';
 import { chromium } from 'playwright';
 
-const PORT = 8901;
+const PORT = Number(process.env.HOPDOCK_UI_TEST_PORT ?? 8902);
 const URL = `http://127.0.0.1:${PORT}/`;
 const results = [];
 
@@ -13,7 +13,7 @@ function check(name, cond, extra = '') {
   console.log(`${cond ? 'ok  ' : 'FAIL'} ${name}${cond ? '' : ' ' + extra}`);
 }
 
-const server = spawn('node', ['tests/ui/serve.mjs', 'apps/desktop/out/renderer', String(PORT)], { stdio: 'pipe' });
+const server = spawn('node', ['tests/ui/serve.mjs', 'apps/desktop/out/renderer', String(PORT), '--fixtures'], { stdio: 'pipe' });
 await new Promise((resolve, reject) => {
   const timer = setTimeout(() => reject(new Error('server did not start')), 15000);
   server.stdout.on('data', (d) => {
@@ -58,11 +58,50 @@ try {
   await page.locator('.hd-pill', { hasText: 'Vaults' }).click();
   await page.locator('.hd-rail-item', { hasText: 'Keychain' }).click();
   check('keychain renders', await page.locator('[data-testid="keys-table"]').isVisible());
+  await page.getByRole('button', { name: 'New key', exact: true }).click();
+  await page.getByLabel('Key name', { exact: true }).fill('Drag selection');
+  const field = await page.getByLabel('Key name', { exact: true }).boundingBox();
+  await page.mouse.move(field.x + 80, field.y + field.height / 2);
+  await page.mouse.down(); await page.mouse.move(40, field.y + field.height / 2, { steps: 10 }); await page.mouse.up();
+  check('selection dragged outside key drawer keeps it open', await page.getByRole('dialog').isVisible());
+  await page.mouse.click(40, 100);
+  check('separate backdrop click still dismisses drawer', await page.getByRole('dialog').count() === 0);
+  await page.getByRole('button', { name: 'Edit key id_ed25519', exact: true }).click();
+  const keyField = await page.getByLabel('Public key', { exact: true }).boundingBox();
+  await page.mouse.move(keyField.x + 100, keyField.y + 15);
+  await page.mouse.down(); await page.mouse.move(40, keyField.y + 15, { steps: 10 }); await page.mouse.up();
+  check('selection dragged outside Edit key keeps it open', await page.getByRole('dialog', { name: 'Edit key', exact: true }).isVisible());
+  await page.mouse.click(40, 100);
+  check('Edit key backdrop click still dismisses', await page.getByRole('dialog').count() === 0);
   await page.locator('.hd-rail-item', { hasText: 'Snippets' }).click();
   check('snippets render', await page.locator('[data-testid="snippets-table"]').isVisible());
   await page.locator('.hd-rail-item', { hasText: 'Settings' }).click();
-  check('settings renders sync form', await page.getByText('Encrypted vault sync').isVisible());
+  check('settings renders sync form', await page.getByText('Vault sync (Supabase)', { exact: true }).isVisible());
   check('settings renders updater', await page.getByText('Application updates').isVisible());
+
+  await page.getByRole('button', { name: 'Hosts', exact: true }).click();
+  await page.evaluate(() => { window.hopdock.winscp.open = () => Promise.reject(new Error('private key file missing on this device')); });
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await page.getByRole('button', { name: 'Actions for web-02', exact: true }).click(); await page.getByText('Open in WinSCP', { exact: true }).click();
+    await page.getByText('Private key unavailable', { exact: true }).waitFor();
+  }
+  check('notification explains missing key and deduplicates repeats', await page.locator('.hd-error-notifications [role=alert]').count() === 1);
+  await page.getByRole('button', { name: 'Try again', exact: true }).click(); await page.getByText('Private key unavailable', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Open Keychain', exact: true }).click();
+  check('notification recovery action opens Keychain', await page.getByTestId('keys-table').isVisible());
+  await page.getByRole('button', { name: 'Dismiss error', exact: true }).click();
+
+  await page.evaluate(() => { window.hopdock.updater.status = () => Promise.resolve({ state: 'up-to-date', version: '0.0.6', revision: 4 }); });
+  await page.getByRole('button', { name: 'Settings', exact: true }).click(); await page.getByText(/You’re up to date/).waitFor();
+  check('Settings restores an up-to-date snapshot', await page.getByText(/Latest release: 0.0.6/).isVisible());
+  await page.evaluate(() => { window.hopdock.updater.status = () => Promise.resolve({ state: 'downloaded', version: '0.0.7', percent: 100, revision: 5 }); });
+  await page.getByRole('button', { name: 'Hosts', exact: true }).click(); await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByRole('button', { name: 'Restart to install', exact: true }).waitFor();
+  check('ready update survives leaving Settings; duplicate check is disabled', await page.getByRole('button', { name: 'Check for updates', exact: true }).isDisabled());
+  await page.evaluate(() => { void Promise.reject(new Error('Unknown failure password=DO_NOT_SHOW_THIS')); });
+  await page.getByText('Operation could not be completed', { exact: true }).waitFor();
+  check('background failure has a safe fallback without raw secrets', !(await page.locator('.hd-error-notifications').innerText()).includes('DO_NOT_SHOW_THIS'));
+  await page.getByRole('button', { name: 'Dismiss error', exact: true }).click();
 
   check('no page errors', errors.length === 0, errors.join(' | '));
 } catch (e) {

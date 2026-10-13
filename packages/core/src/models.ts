@@ -12,15 +12,16 @@ export interface HostGroup {
   vaultId: Id;
   name: string;
   sort: number;
+  updatedAt?: string;
 }
 
-export type AuthType = 'password' | 'key' | 'agent' | 'cert';
+export type AuthType = 'password' | 'key' | 'key-password' | 'agent' | 'cert';
 
 export interface HostAuth {
   type: AuthType;
   /** KeyRef id for key/cert auth */
   keyId?: Id;
-  /** OS-keychain reference for password auth (never stored in sync blobs) */
+  /** Local OS-keychain reference; sync carries a separately encrypted password. */
   passwordRef?: Id;
 }
 
@@ -48,6 +49,7 @@ export interface Host {
   sort: number;
   starred: boolean;
   latencyMs?: number;
+  os?: { id: string; name: string; version?: string; family?: string; source: 'probe' | 'banner'; detectedAt: string };
   updatedAt: string;
 }
 
@@ -60,7 +62,7 @@ export interface KeyRef {
   kind: KeyKind;
   fingerprint: string;
   publicKey: string;
-  /** OS-keychain reference to the private key */
+  /** Device-local path to the private key file; never used as a remote sync path. */
   privateRef: Id;
   updatedAt: string;
 }

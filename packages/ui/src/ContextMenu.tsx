@@ -12,12 +12,15 @@ export function ContextMenu({ x, y, items, onClose }: { x: number; y: number; it
   const [pos, setPos] = useState({ x, y });
   useEffect(() => {
     const close = () => onClose();
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
     window.addEventListener('click', close);
     window.addEventListener('blur', close);
+    window.addEventListener('keydown', onKey);
     setPos({ x: Math.min(x, window.innerWidth - 240), y: Math.min(y, window.innerHeight - items.length * 38 - 20) });
     return () => {
       window.removeEventListener('click', close);
       window.removeEventListener('blur', close);
+      window.removeEventListener('keydown', onKey);
     };
   }, [x, y, items.length, onClose]);
   return (

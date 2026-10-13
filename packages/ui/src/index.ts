@@ -16,3 +16,7 @@ export type { MenuItem } from './ContextMenu';
 export { Icons } from './icons';
 export { osTile } from './os';
 export type * from './preload-api';
+export * from './TextPrompt';
+export * from './FilePicker';
+export * from './ErrorNotice';
+export * from './AppErrorBoundary';

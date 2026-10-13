@@ -1,5 +1,6 @@
 import ssh2 from 'ssh2';
 import type { Client, ClientChannel, SFTPWrapper } from 'ssh2';
+import { posix } from 'node:path';
 
 export interface ConnectOpts {
   host: string;
@@ -34,6 +35,7 @@ interface Session {
   client: Client;
   shell?: ClientChannel;
   sftp?: SFTPWrapper;
+  banner?: string;
 }
 
 const DEFAULT_TIMEOUT = 15000;
@@ -48,10 +50,12 @@ export class SessionManager {
     await this.close(id).catch(() => undefined);
     const client = new ssh2.Client();
     const session: Session = { client };
+    client.on('banner', (message: string) => { session.banner = message.slice(0, 4096); });
     this.sessions.set(id, session);
 
-    await new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error('SSH ready timeout')), opts.readyTimeoutMs ?? DEFAULT_TIMEOUT);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try { await new Promise<void>((resolve, reject) => {
+      timer = setTimeout(() => reject(new Error('SSH ready timeout')), opts.readyTimeoutMs ?? DEFAULT_TIMEOUT);
       client.on('ready', () => {
         client.shell({ term: 'xterm-256color', cols, rows }, (err, stream) => {
           clearTimeout(timer);
@@ -62,7 +66,7 @@ export class SessionManager {
           session.shell = stream;
           stream.on('data', (d: Buffer) => this.emit('ssh:data', { id, data: d.toString('base64') }));
           stream.stderr.on('data', (d: Buffer) => this.emit('ssh:data', { id, data: d.toString('base64') }));
-          stream.on('close', () => this.emit('ssh:close', { id }));
+          stream.on('close', () => { if (this.sessions.get(id) === session) this.emit('ssh:close', { id }); });
           resolve();
         });
       });
@@ -70,7 +74,17 @@ export class SessionManager {
         clearTimeout(timer);
         reject(err);
       });
-      client.on('close', () => this.emit('ssh:close', { id }));
+      client.on('close', () => {
+        clearTimeout(timer);
+        if (this.sessions.get(id) === session) { this.sessions.delete(id); this.emit('ssh:close', { id }); }
+        reject(new Error('SSH connection closed before the session was ready'));
+      });
+      client.on('keyboard-interactive', (_name, _instructions, _language, prompts, finish) => {
+        // Never send a saved password to an OTP or arbitrary interactive challenge.
+        if (opts.password && prompts.length === 1 && !prompts[0]?.echo && /password/i.test(prompts[0]?.prompt ?? '')) finish([opts.password]);
+        else if (prompts.length === 0) finish([]);
+        else { reject(new Error('This server requires an interactive challenge that cannot use the saved password.')); client.destroy(); }
+      });
       client.connect({
         host: opts.host,
         port: opts.port,
@@ -79,10 +93,17 @@ export class SessionManager {
         privateKey: opts.privateKey,
         passphrase: opts.passphrase,
         agent: opts.agent,
+        authHandler: opts.privateKey && opts.password ? ['publickey', 'password', 'keyboard-interactive'] : undefined,
+        tryKeyboard: !!opts.password,
         readyTimeout: opts.readyTimeoutMs ?? DEFAULT_TIMEOUT,
         keepaliveInterval: 15000,
       });
-    });
+    }); } catch (error) {
+      clearTimeout(timer);
+      if (this.sessions.get(id) === session) this.sessions.delete(id);
+      client.destroy();
+      throw error;
+    }
   }
 
   write(id: string, dataB64: string): void {
@@ -94,24 +115,34 @@ export class SessionManager {
     if (shell) shell.setWindow(rows, cols, 0, 0);
   }
 
-  exec(id: string, command: string): Promise<ExecResult> {
+  sessionIdentity(id: string): object | undefined { return this.sessions.get(id); }
+  banner(id: string): string { return this.sessions.get(id)?.banner ?? ''; }
+  exec(id: string, command: string, options?: { timeoutMs: number; maxOutputBytes: number }): Promise<ExecResult> {
     const session = this.sessions.get(id);
     if (!session) return Promise.reject(new Error(`no session: ${id}`));
     return new Promise((resolve, reject) => {
+      let channel: ClientChannel | undefined, settled = false, bytes = 0;
+      const fail = (error: Error) => { if (settled) return; settled = true; clearTimeout(timer); reject(error); channel?.close(); };
+      const timer = options ? setTimeout(() => fail(new Error('OS probe timeout')), options.timeoutMs) : undefined;
       session.client.exec(command, (err, stream) => {
+        if (settled) { stream?.close(); return; }
         if (err) {
-          reject(err);
+          fail(err);
           return;
         }
         let stdout = '';
         let stderr = '';
+        channel = stream;
+        stream.on('error', fail);
         stream.on('data', (d: Buffer) => {
+          bytes += d.length; if (options && bytes > options.maxOutputBytes) { fail(new Error('OS probe output limit')); return; }
           stdout += d.toString();
         });
         stream.stderr.on('data', (d: Buffer) => {
+          bytes += d.length; if (options && bytes > options.maxOutputBytes) { fail(new Error('OS probe output limit')); return; }
           stderr += d.toString();
         });
-        stream.on('close', (code: number, signal: string) => resolve({ stdout, stderr, code, signal }));
+        stream.on('close', (code: number, signal: string) => { if (settled) return; settled = true; clearTimeout(timer); resolve({ stdout, stderr, code, signal }); });
       });
     });
   }
@@ -150,6 +181,11 @@ export class SessionManager {
             ),
       );
     });
+  }
+
+  async realpath(id: string, path: string): Promise<string> {
+    const sftp = await this.sftpOf(id);
+    return new Promise((resolve, reject) => sftp.realpath(path, (error, value) => error ? reject(error) : resolve(value)));
   }
 
   async download(id: string, remotePath: string, localPath: string, op = 'download'): Promise<void> {
@@ -219,6 +255,7 @@ export class SessionManager {
 
   /** Server-side copy via SFTP stream pump (works across sessions/hosts). */
   async copy(id: string, from: string, to: string): Promise<void> {
+    if (posix.normalize(from) === posix.normalize(to)) throw new Error('Source and destination are the same file.');
     const sftp = await this.sftpOf(id);
     const size = await new Promise<number>((resolve, reject) => {
       sftp.stat(from, (err, stats) => (err ? reject(err) : resolve(Number(stats.size))));
@@ -242,6 +279,7 @@ export class SessionManager {
     const session = this.sessions.get(id);
     if (!session) return;
     this.sessions.delete(id);
+    this.emit('ssh:close', { id });
     session.shell?.close();
     session.client.end();
   }

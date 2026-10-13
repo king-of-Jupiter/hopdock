@@ -11,7 +11,11 @@
     "dev": "npm run dev --workspace apps/desktop",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test:ssh": "npm run test:e2e --workspace packages/ssh",
-    "test:ui": "node tests/ui/smoke.mjs"
+    "test:ui": "node tests/ui/smoke.mjs",
+    "test:desktop": "tsx tests/desktop/e2e.ts",
+    "test:winscp": "tsx tests/desktop/winscp.ts",
+    "test:updates": "tsx --test apps/desktop/src/main/update-controller.test.ts",
+    "test:updates:real": "node tests/desktop/update-real.mjs"
   },
   "devDependencies": {
     "playwright": "^1.64.0",

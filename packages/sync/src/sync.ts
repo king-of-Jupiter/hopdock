@@ -1,5 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
+import type { WebSocketLikeConstructor } from '@supabase/realtime-js';
 
 export interface SyncCreds {
   url: string;
@@ -21,7 +23,7 @@ export interface VaultItem {
 
 /**
  * Dumb-blob sync: last-writer-wins by updated_at.
- * Private key material and passwords NEVER enter here — only public metadata.
+ * Host passwords, private keys and snippets enter only as authenticated ciphertext.
  */
 export class SyncEngine {
   private client: SupabaseClient | null = null;
@@ -33,7 +35,8 @@ export class SyncEngine {
       this.client = null;
       return;
     }
-    this.client = createClient(creds.url, creds.anonKey);
+    // ws implements the browser-compatible transport, with different Event callback types.
+    this.client = createClient(creds.url, creds.anonKey, { realtime: { transport: WebSocket as unknown as WebSocketLikeConstructor } });
     this.email = creds.email;
     this.password = creds.password;
   }
@@ -64,13 +67,18 @@ export class SyncEngine {
 
   async pull(since: string): Promise<VaultItem[]> {
     const client = await this.authed();
-    const { data, error } = await client
-      .from('vault_items')
-      .select('id,vault_id,kind,data,updated_at,deleted_at')
-      .gt('updated_at', since)
-      .order('updated_at', { ascending: true })
-      .limit(1000);
-    if (error) throw error;
-    return (data ?? []) as VaultItem[];
+    const items: VaultItem[] = [];
+    for (let offset = 0; ; offset += 1000) {
+      const { data, error } = await client
+        .from('vault_items')
+        .select('id,vault_id,kind,data,updated_at,deleted_at')
+        .gt('updated_at', since)
+        .order('updated_at', { ascending: true })
+        .order('id', { ascending: true })
+        .range(offset, offset + 999);
+      if (error) throw error;
+      items.push(...((data ?? []) as VaultItem[]));
+      if (!data || data.length < 1000) return items;
+    }
   }
 }

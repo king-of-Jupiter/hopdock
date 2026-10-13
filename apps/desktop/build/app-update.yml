@@ -1,0 +1,4 @@
+provider: github
+owner: king-of-Jupiter
+repo: hopdock
+updaterCacheDirName: hopdock-desktop-updater

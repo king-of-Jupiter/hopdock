@@ -1,0 +1,119 @@
+{
+  "date": "2026-10-13T00:21:28.170Z",
+  "profile": "C:\\Users\\freshh\\AppData\\Local\\Temp\\hopdock-desktop-test-u5PW4D",
+  "results": [
+    {
+      "name": "Native preload, sandbox and isolated empty vault",
+      "passed": true
+    },
+    {
+      "name": "Create password host through UI, validation and real SSH",
+      "passed": true
+    },
+    {
+      "name": "Terminal input, Unicode, resize, stdout/stderr and exit codes",
+      "passed": true
+    },
+    {
+      "name": "Terminal snippets CRUD, variables, search and resize preserve the live SSH session",
+      "passed": true
+    },
+    {
+      "name": "Search, groups, hide-grouped and theme persistence",
+      "passed": true
+    },
+    {
+      "name": "Edit host preserves password; disconnected terminal reconnects",
+      "passed": true
+    },
+    {
+      "name": "Wrong password and unknown host errors",
+      "passed": true
+    },
+    {
+      "name": "SFTP both panels, directory navigation without reconnection",
+      "passed": true
+    },
+    {
+      "name": "Native file picker bridge uploads/downloads exact binary content and handles cancellation",
+      "passed": true
+    },
+    {
+      "name": "SFTP mkdir, copy, rename, chmod, file deletion and recursive deletion",
+      "passed": true
+    },
+    {
+      "name": "SFTP context menu bindings: copy, rename, permissions and delete; same-file protection",
+      "passed": true
+    },
+    {
+      "name": "Generate encrypted Ed25519 and RSA keys; fingerprints and Keychain UI",
+      "passed": true
+    },
+    {
+      "name": "ssh-copy-id and HostForm key selection authenticate with encrypted key",
+      "passed": true
+    },
+    {
+      "name": "Combined host credentials: UI, preserved password on edits and actual SSH",
+      "passed": true
+    },
+    {
+      "name": "Missing private key shows a designed notification, recovery link, safe IPC code and dismissal",
+      "passed": true
+    },
+    {
+      "name": "Key drawer: private/public material, rename, native exports, invalid edit leaves key usable",
+      "passed": true
+    },
+    {
+      "name": "Key import, RSA authentication and real local SSH agent",
+      "passed": true
+    },
+    {
+      "name": "Snippet UI create/edit, variable substitution, execution and delete",
+      "passed": true
+    },
+    {
+      "name": "Sync settings, build configuration, encryption password persistence and missing account error",
+      "passed": true
+    },
+    {
+      "name": "Keychain Generate, Import and Copy ID buttons with in-app text dialogs",
+      "passed": true
+    },
+    {
+      "name": "Update-check control handles development builds without hanging",
+      "passed": true
+    },
+    {
+      "name": "Delete keys and host, remove local files/secrets and persist tombstones",
+      "passed": true
+    },
+    {
+      "name": "Designed key form in both themes, RSA selection, keyboard cancel and focus stays in modal",
+      "passed": true
+    },
+    {
+      "name": "No unhandled renderer errors or system message dialogs",
+      "passed": true
+    },
+    {
+      "name": "Real Supabase SDK and IPC: encrypted two-device sync; restored SSH password/key and snippet execution",
+      "passed": true
+    },
+    {
+      "name": "Corrupt local vault returns a recoverable error without replacing saved data",
+      "passed": true
+    },
+    {
+      "name": "Groups: menu creation, inline creation, preselection, moving hosts and persistence",
+      "passed": true
+    },
+    {
+      "name": "Settings direct Termius import: no file picker, credentials, keys, snippets, duplicates and safe failures",
+      "passed": true
+    }
+  ],
+  "rendererErrors": []
+}
