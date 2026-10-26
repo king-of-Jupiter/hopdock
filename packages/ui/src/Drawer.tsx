@@ -19,7 +19,7 @@ export function Drawer({ title, eyebrow, description, children, footer, onClose,
   const backdrop = useBackdropDismiss(close);
   return <div className="hd-overlay hd-drawer-overlay" {...backdrop}>
     <form ref={panel} noValidate={noValidate} className={`hd-modal hd-drawer ${className}`} role="dialog" aria-modal="true" aria-label={title} onClick={(event) => event.stopPropagation()} onKeyDown={(event) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); } }} onSubmit={(event) => { event.preventDefault(); onSubmit?.(event); }}>
-      <header className="hd-drawer-heading"><div>{eyebrow && <span className="hd-dialog-eyebrow">{eyebrow}</span>}<h2>{title}</h2></div><button className="hd-icon-btn" type="button" aria-label={`Close ${title.toLowerCase()}`} disabled={busy} onClick={close}><Icons.close /></button></header>
+      <header className="hd-drawer-heading"><h2>{title}</h2><button className="hd-icon-btn" type="button" aria-label={`Close ${title.toLowerCase()}`} disabled={busy} onClick={close}><Icons.close /></button></header>
       <div className="hd-drawer-body">{description && <p className="hd-dialog-note hd-drawer-description">{description}</p>}{children}</div>
       <footer className="hd-drawer-footer">{footer}</footer>
     </form>

@@ -37,7 +37,7 @@ export function KeyDetails({ entry, onClose, onChanged }: { entry: KeyRef; onClo
       const updated = await window.hopdock.keys.update(entry.id, { name, privateKey, passphrase });
       setPublicKey(updated.publicKey); setFingerprint(updated.fingerprint); setSaved({ name: name.trim(), privateKey, passphrase }); setName(name.trim()); setNotice('Key saved.'); onChanged();
     }); }}>
-      <header className="hd-key-drawer-heading"><div><span className="hd-dialog-eyebrow">KEYCHAIN</span><h2>Edit key</h2></div><button className="hd-icon-btn" type="button" aria-label="Close key details" disabled={busy} onClick={close}><Icons.close /></button></header>
+      <header className="hd-key-drawer-heading"><h2>Edit key</h2><button className="hd-icon-btn" type="button" aria-label="Close key details" disabled={busy} onClick={close}><Icons.close /></button></header>
       <div className="hd-key-drawer-body hd-form">
         <div className="hd-key-vault"><Icons.folder /><span>Personal</span><span className="hd-badge">{entry.kind}</span></div>
         <label>Label<input autoFocus aria-label="Label" className="hd-input" value={name} onChange={(event) => setName(event.target.value)} required /></label>
@@ -47,7 +47,7 @@ export function KeyDetails({ entry, onClose, onChanged }: { entry: KeyRef; onClo
         <label>Public key<textarea aria-label="Public key" className="hd-input mono hd-key-public" readOnly value={publicKey} spellCheck={false} /></label>
         <div className="hd-key-copy-row"><span className="hd-dialog-note">Share this key with your servers.</span><button className="hd-btn" type="button" disabled={busy} onClick={() => copy(publicKey, 'Public key')}>Copy public key</button></div>
         <label>Fingerprint<input aria-label="Fingerprint" className="hd-input mono" readOnly value={fingerprint} /></label>
-        <div className="hd-key-export"><label>Export format<select aria-label="Export format" className="hd-input" value={format} onChange={(event) => setFormat(event.target.value as 'original' | 'ppk')}><option value="original">Original private key</option><option value="ppk">PuTTY (.ppk) · WinSCP</option></select></label><button className="hd-btn" type="button" disabled={loading || !privateKey || busy || dirty} onClick={() => void run(async () => {
+        <div className="hd-key-export"><label>Export format<select aria-label="Export format" className="hd-input" value={format} onChange={(event) => setFormat(event.target.value as 'original' | 'ppk')}><option value="original">Original private key</option><option value="ppk">PuTTY (.ppk) for WinSCP</option></select></label><button className="hd-btn" type="button" disabled={loading || !privateKey || busy || dirty} onClick={() => void run(async () => {
           const paths = await pickFiles('Export private key', { save: true, filename: name.replace(/[<>:"/\\|?*\x00-\x1f]/g, '_') + (format === 'ppk' ? '.ppk' : '.key') });
           if (paths?.[0]) { await window.hopdock.keys.export(entry.id, paths[0], format); setNotice('Private key exported.'); }
         })}>Export private key</button></div>

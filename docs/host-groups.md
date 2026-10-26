@@ -11,3 +11,9 @@ Host creation and editing have a Group field with No group, existing groups and 
 New groups receive unique IDs and update timestamps. Incremental vault sync now uploads groups created after initial migration and preserves newer local group metadata when pulling older remote records.
 
 Validation: 27 Electron scenarios, 19 browser checks, 9 sync unit checks, typecheck and production build passed. The added Electron scenario covers menu creation, inline creation, preselection, no-group assignment, persistence and duplicate names using an isolated profile and local SSH server. A browser check covers pending inline-group validation. Sync restoration is verified through the test transport; live account data was not modified.
+
+## Native drag fix — 27 October 2026
+
+Real mouse drags in the Electron window were cancelled immediately: React re-rendered synchronously inside `dragstart` (drop targets appeared and the card shifted), and Chromium aborts a native drag when the DOM moves during that event. Headless Chromium hid this. The dragged id now lives in a ref set synchronously; the drop targets appear a tick later and `dragend` cancels the pending reveal. While dragging, group cards get a dashed accent outline and the Groups heading says where to drop.
+
+On Windows the Electron e2e now performs a real OS drag through SendInput (`tests/desktop/os-drag.ps1`); other platforms dispatch DOM drag events, because Playwright cannot drive the native drag loop in Electron.

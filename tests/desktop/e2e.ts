@@ -5,6 +5,7 @@ import * as fs from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { generateKeyPairSync } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { publicKeyFromPrivate } from '@hopdock/ssh';
 import { startSSH } from './ssh-server.mjs';
 import { startSyncServer } from './sync-server.mjs';
@@ -277,7 +278,7 @@ try {
     }
   });
   await step('Snippet UI create/edit, variable substitution, execution and delete', async () => {
-    await page.getByRole('button', { name: 'Snippets', exact: true }).click(); await page.getByRole('button', { name: 'NEW SNIPPET', exact: true }).click();
+    await page.getByRole('button', { name: 'Snippets', exact: true }).click(); await page.getByRole('button', { name: 'New snippet', exact: true }).click();
     await page.getByLabel('Name', { exact: true }).fill('Local snippet'); await page.getByLabel('Folder', { exact: true }).fill('tests'); await page.locator('textarea').fill('echo ${value}'); await page.getByRole('button', { name: 'Save', exact: true }).click(); await expect(page.getByTestId('snippets-table')).toContainText('Local snippet');
     await page.getByPlaceholder('$value', { exact: true }).fill('snippet-roundtrip'); await page.locator('.hd-toolbar select').last().selectOption(hostId); await page.getByRole('button', { name: 'Run', exact: true }).click(); await expect(page.locator('.hd-modal pre')).toContainText('snippet-roundtrip');
     await page.getByRole('button', { name: 'Close', exact: true }).click(); await page.getByRole('button', { name: 'Edit', exact: true }).click(); await page.locator('textarea').fill('echo changed'); await page.getByRole('button', { name: 'Save', exact: true }).click(); await expect(page.getByTestId('snippets-table')).toContainText('echo changed');
@@ -497,6 +498,92 @@ try {
     fs.writeFileSync(file, '{invalid-json'); const previous = fs.readFileSync(join(profile, 'hopdock/hopdock-vault.json'), 'utf8');
     await page.getByRole('button', { name: 'Import from Termius', exact: true }).click(); await expect(page.getByText('Termius data could not be imported', { exact: true })).toBeVisible();
     assert.equal(fs.readFileSync(join(profile, 'hopdock/hopdock-vault.json'), 'utf8'), previous);
+  });
+  await step('Connection screen stages, detailed auth failure, mouse drag into a group, tab menu, a duplicate session and a second window', async () => {
+    const group = await page.evaluate(() => window.hopdock.vault.saveGroup('Drag target'));
+    const good = await page.evaluate((port) => window.hopdock.vault.saveHost({ name: 'Drag me', host: '127.0.0.1', port, username: 'tester', auth: { type: 'password' }, tags: [], password: 'local-test-password' }), server.port);
+    const bad = await page.evaluate((port) => window.hopdock.vault.saveHost({ name: 'Bad password', host: '127.0.0.1', port, username: 'tester', auth: { type: 'password' }, tags: [], password: 'wrong' }), server.port);
+    await page.reload(); await page.getByRole('button', { name: 'Hosts', exact: true }).click(); await page.locator('[data-name="Drag me"]').waitFor();
+    await page.getByTestId('host-search').fill('Drag me'); await page.getByRole('button', { name: 'Drag target 0 hosts' }).scrollIntoViewIfNeeded();
+    const card = (await page.locator('[data-name="Drag me"]').boundingBox())!;
+    const target = (await page.getByRole('button', { name: 'Drag target 0 hosts' }).boundingBox())!;
+    if (process.platform === 'win32') {
+      // A real drag through Windows input: this is what caught drags being cancelled by a re-render inside dragstart.
+      const win = await page.evaluate(() => ({ x: window.screenX, y: window.screenY, dpr: devicePixelRatio, top: window.outerHeight - window.innerHeight, side: (window.outerWidth - window.innerWidth) / 2 }));
+      const sx = (px: number) => String(Math.round((win.x + win.side + px) * win.dpr)), sy = (py: number) => String(Math.round((win.y + win.top - win.side + py) * win.dpr));
+      await app.evaluate(({ BrowserWindow }) => { const w = BrowserWindow.getAllWindows()[0]!; w.setAlwaysOnTop(true); w.focus(); });
+      execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolve('tests/desktop/os-drag.ps1'), sx(card.x + 60), sy(card.y + card.height / 2), sx(target.x + 40), sy(target.y + target.height / 2)]);
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setAlwaysOnTop(false));
+    } else {
+      await page.evaluate(() => {
+        const data = new DataTransfer(); const source = document.querySelector('[data-name="Drag me"]')!;
+        const group = Array.from(document.querySelectorAll('.hd-group-card')).find((el) => el.textContent?.startsWith('Drag target'))!;
+        source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer: data }));
+        return new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => {
+          for (const type of ['dragenter', 'dragover', 'drop']) group.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: data }));
+          source.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer: data })); done();
+        })));
+      });
+    }
+    await expect.poll(async () => (await page.evaluate(() => window.hopdock.vault.get())).hosts.find((h) => h.name === 'Drag me')?.groupId).toBe(group.id);
+    await expect(page.locator('.hd-session-pill')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Drag target 1 hosts' }).waitFor();
+
+    await page.evaluate(() => { (window as any).__stages = []; window.hopdock.ssh.onProgress((e) => (window as any).__stages.push(e)); });
+    await page.getByRole('button', { name: 'Drag target 1 hosts' }).click(); await page.getByRole('button', { name: 'Connect to Drag me' }).click();
+    await page.locator('[data-testid=terminal][data-status=live]').waitFor();
+    const stages = await page.evaluate((id) => (window as any).__stages.filter((e: any) => e.id === id), good.id);
+    assert.deepEqual([...new Set(stages.map((e: any) => e.stage))], ['socket', 'connected', 'hostkey', 'handshake', 'auth', 'shell', 'ready']);
+    assert.match(stages.find((e: any) => e.stage === 'hostkey').detail, /^SHA256:[A-Za-z0-9+/]{43}$/);
+    assert.ok(!JSON.stringify(stages).includes('local-test-password'));
+
+    const connections = server.metrics.connections;
+    await hosts(); await page.locator('.hd-pill', { hasText: 'Drag me' }).click(); await page.locator('[data-testid=terminal][data-status=live]').waitFor();
+    assert.equal(server.metrics.connections, connections, 'switching tabs keeps the session');
+
+    await hosts(); await page.getByRole('button', { name: 'Back to all hosts' }).click().catch(() => undefined);
+    await page.getByRole('button', { name: 'Connect to Bad password' }).click();
+    await expect(page.getByTestId('connect-screen').getByRole('heading', { name: 'Authentication failed' })).toBeVisible();
+    await expect(page.getByTestId('connect-screen').locator('.hd-connect-facts')).toContainText('Authentication');
+    await expect(page.getByTestId('connect-screen').getByRole('button', { name: 'Edit host' })).toBeVisible();
+    assert.ok(!(await page.getByTestId('connect-screen').innerText()).includes('wrong'));
+    await page.getByTestId('connect-screen').getByRole('button', { name: 'Close tab' }).click();
+    await expect(page.locator('.hd-pill', { hasText: 'Bad password' })).toHaveCount(0);
+    await page.evaluate((id) => window.hopdock.vault.deleteHost(id), bad.id);
+
+    const beforeWindow = server.metrics.connections;
+    await page.locator('.hd-pill', { hasText: 'Drag me' }).click({ button: 'right' });
+    const opened = app.waitForEvent('window');
+    await page.getByRole('button', { name: 'Open in new window', exact: true }).click();
+    const second = await opened;
+    await second.locator('[data-testid=terminal][data-status=live]').waitFor({ timeout: 15000 });
+    await expect(second).toHaveTitle('Drag me \u2014 Hopdock');
+    assert.equal(server.metrics.connections, beforeWindow + 1, 'the new window opens its own session');
+    await second.close();
+    await page.locator('.hd-pill', { hasText: 'Drag me' }).click(); await page.locator('[data-testid=terminal][data-status=live]').waitFor();
+    await page.getByTestId('terminal').locator('.xterm').click(); await page.keyboard.type('echo first-window-alive\n'); await expect.poll(() => server.metrics.shellInput).toContain('first-window-alive');
+    await page.locator('.hd-pill', { hasText: 'Drag me' }).click({ button: 'right' });
+    await expect(page.locator('.hd-menu button')).toHaveText(process.platform === 'win32'
+      ? ['Duplicate session', 'Open in WinSCP', 'Open in new window', 'Open SFTP', 'Edit host', 'Close tab']
+      : ['Duplicate session', 'Open in new window', 'Open SFTP', 'Edit host', 'Close tab']);
+    await page.keyboard.press('Escape');
+    // A second session to the same host: its own tab and SSH connection; input goes only to it; closing it keeps the first.
+    const beforeDuplicate = server.metrics.connections;
+    await page.locator('.hd-pill', { hasText: 'Drag me' }).click({ button: 'right' });
+    await page.getByRole('button', { name: 'Duplicate session', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Close Drag me (2)', exact: true })).toBeVisible();
+    await page.locator('[data-testid=terminal][data-status=live]').waitFor();
+    assert.equal(server.metrics.connections, beforeDuplicate + 1, 'the duplicate opens its own SSH session');
+    await page.getByTestId('terminal').locator('.xterm').click(); await page.keyboard.type('echo zq\n');
+    // The fixture shell answers each keystroke as `echo:<key>`; z and q are typed nowhere else.
+    await expect(page.getByTestId('terminal').locator('.xterm-rows')).toContainText('echo:z');
+    await page.getByRole('button', { name: 'Close Drag me (2)', exact: true }).click();
+    await expect(page.locator('.hd-session-pill')).toHaveCount(1);
+    await page.locator('.hd-pill', { hasText: 'Drag me' }).click(); await page.locator('[data-testid=terminal][data-status=live]').waitFor();
+    await expect(page.getByTestId('terminal').locator('.xterm-rows')).not.toContainText('echo:z');
+    await page.getByTestId('terminal').locator('.xterm').click(); await page.keyboard.type('echo original-still-live\n');
+    await expect.poll(() => server.metrics.shellInput).toContain('original-still-live');
+    await expect(page.getByTestId('terminal').locator('.xterm-rows')).toContainText('echo:v');
   });
 } finally {
   await app.close(); await server.close(); await syncServer.close(); fs.writeFileSync('docs/functional-test-results.json', JSON.stringify({ date: new Date().toISOString(), profile: root, results, rendererErrors: errors }, null, 2)); console.log('Test fixtures retained:', root);

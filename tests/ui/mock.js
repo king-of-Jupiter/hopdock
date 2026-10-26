@@ -49,6 +49,8 @@
     hosts = []; groups = []; keys = []; snippets = [];
   }
   var dataCbs = new Set();
+  var progressCbs = new Set();
+  var STAGES = [['socket', '10.0.0.5:22'], ['connected'], ['hostkey', 'SHA256:mQ3vKp9xF2nL8sDf'], ['handshake', 'aes128-gcm@openssh.com'], ['auth', 'root (publickey)'], ['shell'], ['ready']];
   var BANNER =
     'Welcome to Ubuntu 22.04.4 LTS (GNU/Linux 5.15.0-105-generic x86_64)\r\n' +
     'Last login: Fri Oct  9 22:14:03 2026 from 10.0.0.7\r\n' +
@@ -136,17 +138,24 @@
     },
     ssh: {
       connect: function (p) {
-        var id = p.hostId;
+        var id = (p.scope ? p.scope + ':' : '') + (p.purpose === 'sftp' ? 'sftp:' : '') + p.hostId + (p.instance > 1 && p.purpose !== 'sftp' ? '#' + p.instance : '');
+        var delay = window.HOPDOCK_MOCK_CONNECT_MS || 0;
+        var failing = !!window.HOPDOCK_MOCK_CONNECT_ERROR;
+        STAGES.slice(0, failing ? 5 : STAGES.length).forEach(function (stage, i) {
+          setTimeout(function () { progressCbs.forEach(function (cb) { cb({ id: id, stage: stage[0], detail: stage[1] }); }); }, (delay / STAGES.length) * i);
+        });
+        if (window.HOPDOCK_MOCK_CONNECT_ERROR) return new Promise(function (_resolve, reject) { setTimeout(function () { reject(new Error(window.HOPDOCK_MOCK_CONNECT_ERROR)); }, delay); });
         setTimeout(function () {
           dataCbs.forEach(function (cb) { cb({ id: id, data: enc(BANNER) }); });
-        }, 200);
-        return Promise.resolve(id);
+        }, delay + 200);
+        return new Promise(function (resolve) { setTimeout(function () { resolve(id); }, delay); });
       },
       write: function () { return Promise.resolve(); },
       resize: function () { return Promise.resolve(); },
       exec: function () { return Promise.resolve({ stdout: 'shot-ok\n', stderr: '', code: 0 }); },
       close: function () { return Promise.resolve(); },
       onData: function (cb) { dataCbs.add(cb); return function () { dataCbs.delete(cb); }; },
+      onProgress: function (cb) { progressCbs.add(cb); return function () { progressCbs.delete(cb); }; },
       onClose: function () { return function () {}; },
     },
     sftp: {
@@ -194,6 +203,9 @@
       saveCreds: function () { return Promise.resolve(); },
       setEncryptionPassword: function () { this.passwordsConfigured = true; return Promise.resolve(); },
       syncNow: function () { return Promise.resolve({ pushed: 0, pulled: 0 }); },
+    },
+    windows: {
+      openSession: function () { return Promise.resolve(); },
     },
     winscp: {
       status: function () { return Promise.resolve({ supported: true, path: 'C:\\Program Files (x86)\\WinSCP\\WinSCP.exe' }); },

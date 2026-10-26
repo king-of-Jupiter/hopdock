@@ -1,4 +1,5 @@
-import type { DirEntry, ExecResult } from '@hopdock/ssh';
+import type { ConnectProgress, DirEntry, ExecResult } from '@hopdock/ssh';
+export type { ConnectProgress, ConnectStage } from '@hopdock/ssh';
 import type { Host, HostGroup, KeyRef, Snippet } from '@hopdock/core';
 
 export interface ConnectParams {
@@ -6,6 +7,10 @@ export interface ConnectParams {
   cols?: number;
   rows?: number;
   purpose?: 'sftp';
+  /** Set in secondary windows so their sessions never collide with the main window. */
+  scope?: string;
+  /** A second, third… tab to the same host gets its own session. */
+  instance?: number;
 }
 
 export interface SshEvent {
@@ -99,6 +104,10 @@ export interface HopdockApi {
     close(id: string): Promise<void>;
     onData(cb: (e: SshEvent) => void): () => void;
     onClose(cb: (e: { id: string }) => void): () => void;
+    onProgress(cb: (e: ConnectProgress) => void): () => void;
+  };
+  windows: {
+    openSession(hostId: string): Promise<void>;
   };
   sftp: {
     list(id: string, path: string): Promise<DirEntry[]>;

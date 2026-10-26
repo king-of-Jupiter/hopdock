@@ -1,36 +1,16 @@
 import { app, BrowserWindow } from 'electron';
-import { join } from 'path';
 import { registerIpc, setWindow } from './ipc';
 import { checkOnStartup, setupAutoUpdater } from './updater';
 import { cleanupWinSCP } from './winscp';
+import { broadcast, createAppWindow } from './windows';
 let ipcRegistered = false;
 
 function createWindow(): void {
-  const win = new BrowserWindow({
-    width: 1360,
-    height: 860,
-    autoHideMenuBar: true,
-    backgroundColor: '#faf9f5',
-    icon: join(__dirname, '../renderer/app-icon.png'),
-    webPreferences: {
-      preload: join(__dirname, '../preload/index.cjs'),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-    },
-  });
-  win.removeMenu();
+  const win = createAppWindow();
   setWindow(win);
   if (!ipcRegistered) { registerIpc(); ipcRegistered = true; }
-  setupAutoUpdater((channel, payload) => { if (!win.isDestroyed()) win.webContents.send(channel, payload); });
+  setupAutoUpdater(broadcast);
   checkOnStartup();
-
-  const url = process.env['ELECTRON_RENDERER_URL'];
-  if (url) {
-    void win.loadURL(url);
-  } else {
-    void win.loadFile(join(__dirname, '../renderer/index.html'));
-  }
 }
 
 void app.whenReady().then(() => {

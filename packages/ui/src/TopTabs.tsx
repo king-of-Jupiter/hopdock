@@ -6,18 +6,23 @@ import { Icons } from './icons';
 export type Tab =
   | { kind: 'vaults' }
   | { kind: 'sftp'; hostId: string | null }
-  | { kind: 'session'; host: Host };
+  | { kind: 'session'; host: Host; connection?: number; instance?: number };
+
+export function sessionTabLabel(tab: { host: Host; instance?: number }): string {
+  return (tab.instance ?? 1) > 1 ? `${tab.host.name} (${tab.instance})` : tab.host.name;
+}
 
 interface Props {
   tabs: Tab[];
   active: number;
   onPick: (i: number) => void;
-  onCloseSession: (hostId: string) => void;
+  onCloseSession: (index: number) => void;
+  onTabMenu?: (index: number, x: number, y: number) => void;
   leading?: ReactNode;
   trailing?: ReactNode;
 }
 
-export function TopTabs({ tabs, active, onPick, onCloseSession, leading, trailing }: Props) {
+export function TopTabs({ tabs, active, onPick, onCloseSession, onTabMenu, leading, trailing }: Props) {
   return (
     <div className="hd-tabs">
       {leading}
@@ -37,13 +42,13 @@ export function TopTabs({ tabs, active, onPick, onCloseSession, leading, trailin
           );
         }
         return (
-          <div key={t.host.id} className={'hd-pill hd-session-pill' + (i === active ? ' active' : '')}>
-            <button className="hd-tab-select" type="button" onClick={() => onPick(i)}><OsIcon host={t.host} small />{t.host.name}</button>
-            <button type="button" aria-label={`Close ${t.host.name}`}
+          <div key={`${t.host.id}#${t.instance ?? 1}`} className={'hd-pill hd-session-pill' + (i === active ? ' active' : '')} onContextMenu={(e) => { if (!onTabMenu) return; e.preventDefault(); onPick(i); onTabMenu(i, e.clientX, e.clientY); }}>
+            <button className="hd-tab-select" type="button" onClick={() => onPick(i)}><OsIcon host={t.host} small />{sessionTabLabel(t)}</button>
+            <button type="button" aria-label={`Close ${sessionTabLabel(t)}`}
               className="x"
               onClick={(e) => {
                 e.stopPropagation();
-                onCloseSession(t.host.id);
+                onCloseSession(i);
               }}
             >
               <Icons.close />

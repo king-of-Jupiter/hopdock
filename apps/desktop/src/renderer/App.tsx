@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Host, HostGroup, KeyRef, Snippet } from '@hopdock/core';
 import {
   AppShell,
@@ -13,19 +13,32 @@ import {
   TerminalView,
   TextPrompt,
   ErrorNotifications,
+  ContextMenu,
   notifyError,
   confirmAction,
+  launchHostId,
+  terminalSessionId,
 } from '@hopdock/ui';
-import type { HostDraft, RailView, Tab, AccountStatus } from '@hopdock/ui';
+import type { HostDraft, RailView, Tab, AccountStatus, MenuItem, ThemePreference } from '@hopdock/ui';
 import '@hopdock/ui/tokens.css';
 import { buildVersion, buildCommit } from '../build-info';
 
 export function App() {
-  const [theme, setTheme] = useState<'dark' | 'light'>(() => localStorage.getItem('hopdock.theme') === 'dark' ? 'dark' : 'light');
+  // "system" (the default) follows the Windows or macOS appearance and switches live with it.
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() => { const saved = localStorage.getItem('hopdock.theme'); return saved === 'light' || saved === 'dark' ? saved : 'system'; });
+  const [systemDark, setSystemDark] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  useEffect(() => {
+    const query = window.matchMedia('(prefers-color-scheme: dark)');
+    const update = () => setSystemDark(query.matches);
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  const theme = themePreference === 'system' ? (systemDark ? 'dark' : 'light') : themePreference;
+  const setTheme = setThemePreference;
   const [hideGroupedHosts, setHideGroupedHosts] = useState(() => localStorage.getItem('hopdock.hideGroupedHosts') === 'true');
   const [account, setAccount] = useState<AccountStatus | null>(null);
   const [accountOpen, setAccountOpen] = useState(false);
-  const [welcomeDismissed, setWelcomeDismissed] = useState(() => localStorage.getItem('hopdock.welcomeDismissed') === 'true');
+  const [welcomeDismissed, setWelcomeDismissed] = useState(() => !!launchHostId || localStorage.getItem('hopdock.welcomeDismissed') === 'true');
   useEffect(() => { if (welcomeDismissed) localStorage.setItem('hopdock.welcomeDismissed', 'true'); }, [welcomeDismissed]);
   useEffect(() => {
     const stop = window.hopdock.auth.onStatus((next) => { setAccount(next); if (next.signedIn) setWelcomeDismissed(true); });
@@ -35,7 +48,7 @@ export function App() {
     }).catch((error) => { setAccount({ signedIn: false, email: null, backendConfigured: false }); notifyError(error, 'Load account'); });
     return stop;
   }, []);
-  useEffect(() => { localStorage.setItem('hopdock.theme', theme); }, [theme]);
+  useEffect(() => { localStorage.setItem('hopdock.theme', themePreference); }, [themePreference]);
   useEffect(() => { localStorage.setItem('hopdock.hideGroupedHosts', String(hideGroupedHosts)); }, [hideGroupedHosts]);
   useEffect(() => {
     const navigate = (event: Event) => { const view = (event as CustomEvent).detail; if (view === 'keys' || view === 'hosts' || view === 'settings') { setRail(view); setActiveTab(0); } };
@@ -66,11 +79,15 @@ export function App() {
   const [snippetsOpen, setSnippetsOpen] = useState(() => window.innerWidth >= 900);
   const [tabs, setTabs] = useState<Tab[]>([{ kind: 'vaults' }]);
   const [activeTab, setActiveTab] = useState(0);
+  const [hostsReset, setHostsReset] = useState(0);
   useEffect(() => window.hopdock.vault.onHostUpdated((host) => {
     setHosts((previous) => previous.map((item) => item.id === host.id ? host : item));
     setTabs((previous) => previous.map((tab) => tab.kind === 'session' && tab.host.id === host.id ? { ...tab, host } : tab));
   }), []);
   const [form, setForm] = useState<{ open: boolean; initial?: Host | null; groupId?: string | null }>({ open: false });
+  const [tabMenu, setTabMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
+  const [winSCP, setWinSCP] = useState(false);
+  useEffect(() => { void window.hopdock.winscp.status().then((status) => setWinSCP(status.supported)).catch(() => setWinSCP(false)); }, []);
   const [syncLine, setSyncLine] = useState('sync: not configured');
   const [updateReady, setUpdateReady] = useState<string | null>(null);
   useEffect(() => {
@@ -106,12 +123,13 @@ export function App() {
     return () => { stopVault(); stopStatus(); };
   }, []);
 
-  const openTerminal = (h: Host) => {
+  /** Opens or focuses the host's tab; `reconnect` restarts its session (after the host was edited). */
+  const openTerminal = (h: Host, reconnect = false) => {
     setTabs((prev) => {
       const i = prev.findIndex((t) => t.kind === 'session' && t.host.id === h.id);
       if (i >= 0) {
         setActiveTab(i);
-        return prev.map((t) => (t.kind === 'session' && t.host.id === h.id ? { kind: 'session', host: h } : t));
+        return prev.map((t) => (t.kind === 'session' && t.host.id === h.id ? { kind: 'session', host: h, connection: (t.connection ?? 0) + (reconnect ? 1 : 0) } : t));
       }
       setActiveTab(prev.length);
       return [...prev, { kind: 'session', host: h }];
@@ -134,13 +152,25 @@ export function App() {
     });
   };
 
-  const closeSession = (hostId: string) => {
-    void window.hopdock.ssh.close(hostId).catch((error) => notifyError(error, 'Close connection'));
-    setTabs((prev) => {
-      const next = prev.filter((t) => !(t.kind === 'session' && t.host.id === hostId));
-      setActiveTab((a) => Math.min(a, next.length - 1));
-      return next.length > 0 ? next : [{ kind: 'vaults' }];
-    });
+  const closeTabs = (closing: Tab[]) => {
+    if (closing.length === 0) return;
+    for (const t of closing) if (t.kind === 'session') void window.hopdock.ssh.close(terminalSessionId(t.host.id, t.instance)).catch((error) => notifyError(error, 'Close connection'));
+    const current = tabs[activeTab];
+    const next = tabs.filter((t) => !closing.includes(t));
+    const kept = current ? next.indexOf(current) : -1;
+    setTabs(next.length > 0 ? next : [{ kind: 'vaults' }]);
+    setActiveTab(kept >= 0 ? kept : Math.max(0, Math.min(activeTab - 1, next.length - 1)));
+  };
+  const closeTab = (tab: Tab | undefined) => { if (tab) closeTabs([tab]); };
+  const closeHostSessions = (hostId: string) => closeTabs(tabs.filter((t) => t.kind === 'session' && t.host.id === hostId));
+
+  /** Opens another tab with its own SSH session to the same host, right after the original. */
+  const duplicateSession = (index: number) => {
+    const source = tabs[index];
+    if (source?.kind !== 'session') return;
+    const instance = Math.max(...tabs.map((t) => t.kind === 'session' && t.host.id === source.host.id ? t.instance ?? 1 : 0)) + 1;
+    setTabs([...tabs.slice(0, index + 1), { kind: 'session', host: source.host, instance }, ...tabs.slice(index + 1)]);
+    setActiveTab(index + 1);
   };
 
   const saveHost = async (d: HostDraft) => {
@@ -160,13 +190,42 @@ export function App() {
     );
     setForm({ open: false });
     await reload();
-    openTerminal(saved);
+    openTerminal(saved, true);
   };
 
   const deleteHost = async (h: Host) => {
     if (!await confirmAction(`Delete ${h.name}?`, 'The saved host and its password will be removed.')) return;
-    try { await window.hopdock.vault.deleteHost(h.id); closeSession(h.id); await reload(); }
+    try { await window.hopdock.vault.deleteHost(h.id); closeHostSessions(h.id); await reload(); }
     catch (error) { notifyError(error, 'Delete host'); }
+  };
+
+  // A window opened from a tab starts on that host's session.
+  const launched = useRef(false);
+  useEffect(() => {
+    if (!launchHostId || launched.current) return;
+    const host = hosts.find((h) => h.id === launchHostId);
+    if (!host) return;
+    launched.current = true;
+    document.title = `${host.name} — Hopdock`;
+    openTerminal(host);
+  }, [hosts]);
+
+  const openWinSCP = (h: Host) => {
+    const open = () => { void window.hopdock.winscp.open(h.id).catch((error) => notifyError(error, 'Open WinSCP', open)); };
+    open();
+  };
+  const showTabMenu = (index: number, x: number, y: number) => {
+    const tab = tabs[index];
+    if (tab?.kind !== 'session') return;
+    const h = tab.host;
+    setTabMenu({ x, y, items: [
+    { label: 'Duplicate session', onClick: () => duplicateSession(index) },
+    ...(winSCP ? [{ label: 'Open in WinSCP', onClick: () => openWinSCP(h) }] : []),
+    { label: 'Open in new window', onClick: () => { void window.hopdock.windows.openSession(h.id).catch((error) => notifyError(error, 'Open window')); } },
+    { label: 'Open SFTP', onClick: () => openSftp(h) },
+    { label: 'Edit host', onClick: () => setForm({ open: true, initial: hosts.find((item) => item.id === h.id) ?? h }) },
+    { label: 'Close tab', onClick: () => closeTab(tab) },
+    ] });
   };
 
   const tab = tabs[activeTab] ?? { kind: 'vaults' as const };
@@ -178,34 +237,37 @@ export function App() {
     void reload();
   };
   if (!account) return <div className="hd-app hd-auth-screen" data-theme={theme}><div className="hd-auth-loading" role="status">Loading Hopdock…</div></div>;
-  if (!welcomeDismissed && !account.signedIn) return <AuthScreen account={account} theme={theme} onTheme={setTheme} onSignedIn={signedIn} onOffline={() => setWelcomeDismissed(true)} version={`hopdock ${buildVersion} · ${buildCommit}`} />;
+  if (!welcomeDismissed && !account.signedIn) return <AuthScreen account={account} theme={theme} onTheme={setTheme} onSignedIn={signedIn} onOffline={() => setWelcomeDismissed(true)} version={`hopdock ${buildVersion} (${buildCommit})`} />;
 
   return (
     <AppShell
       theme={theme}
+      themePreference={themePreference}
       onTheme={setTheme}
       railView={rail}
       accountEmail={account.signedIn ? account.email : null}
       onAccount={() => setAccountOpen(true)}
       onRailView={(v) => {
+        if (v === 'hosts') setHostsReset((n) => n + 1);
         setRail(v);
         setActiveTab(0);
       }}
       tabs={tabs}
       activeTab={activeTab}
-      onPickTab={setActiveTab}
-      onCloseSession={closeSession}
+      onPickTab={(index) => { if (tabs[index]?.kind === 'vaults') setHostsReset((n) => n + 1); setActiveTab(index); }}
+      onCloseSession={(index) => closeTab(tabs[index])}
+      onTabMenu={showTabMenu}
       snippetsOpen={snippetsOpen}
       onToggleSnippets={() => setSnippetsOpen((value) => !value)}
       status={
         <>
-          <span>hopdock {buildVersion} <span className="hd-commit" title="Git commit used for this build">· {buildCommit}</span></span>
+          <span>hopdock {buildVersion} <span className="hd-commit" title="Git commit used for this build">{buildCommit}</span></span>
           <span>{syncLine}</span>
-          {updateReady !== null && <button className="hd-status-update" onClick={async () => { if (await confirmAction('Update ready', `Hopdock ${updateReady} is ready. Restarting will close active connections.`, 'Restart now', false)) await window.hopdock.updater.install(); }}>Update ready · Restart</button>}
+          {updateReady !== null && <button className="hd-status-update" onClick={async () => { if (await confirmAction('Update ready', `Hopdock ${updateReady} is ready. Restarting will close active connections.`, 'Restart now', false)) await window.hopdock.updater.install(); }} type="button">Restart to update</button>}
         </>
       }
     >
-      {tab.kind === 'session' && <TerminalView key={tab.host.id} host={tab.host} snippets={snippets} snippetsOpen={snippetsOpen} onHideSnippets={() => setSnippetsOpen(false)} onChanged={() => void reload()} />}
+      {tabs.map((t, i) => t.kind === 'session' && <TerminalView key={`${t.host.id}#${t.instance ?? 1}:${t.connection ?? 0}`} host={t.host} instance={t.instance} active={i === activeTab} snippets={snippets} snippetsOpen={snippetsOpen} onHideSnippets={() => setSnippetsOpen(false)} onChanged={() => void reload()} onEditHost={() => setForm({ open: true, initial: hosts.find((item) => item.id === t.host.id) ?? t.host })} onCloseTab={() => closeTab(t)} />)}
       {tab.kind === 'sftp' && <SftpView host={sftpHost} />}
       {tab.kind === 'vaults' && rail === 'hosts' && (
         <HostsView
@@ -218,6 +280,7 @@ export function App() {
           onNew={(groupId) => setForm({ open: true, groupId })}
           onChanged={() => void reload()}
           onEdit={(h) => setForm({ open: true, initial: h })}
+          resetSignal={hostsReset}
           onDelete={(h) => void deleteHost(h)}
         />
       )}
@@ -226,6 +289,7 @@ export function App() {
       {tab.kind === 'vaults' && rail === 'settings' && <SettingsView hideGroupedHosts={hideGroupedHosts} onHideGroupedHosts={setHideGroupedHosts} onSynced={reload} account={account} onAccount={() => setAccountOpen(true)} />}
       {accountOpen && <AccountDrawer account={account} onSignedIn={signedIn} onSignedOut={(next) => { setAccount(next); setAccountOpen(false); void reload(); }} onClose={() => setAccountOpen(false)} onSyncSettings={openSyncSettings} />}
       {form.open && <HostForm initial={form.initial} keys={keys} groups={groups} defaultGroupId={form.groupId} onChanged={() => void reload()} onSave={saveHost} onClose={() => setForm({ open: false })} />}
+      {tabMenu && <ContextMenu x={tabMenu.x} y={tabMenu.y} items={tabMenu.items} onClose={() => setTabMenu(null)} />}
       <TextPrompt />
       <ErrorNotifications />
     </AppShell>

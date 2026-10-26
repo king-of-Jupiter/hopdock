@@ -7,6 +7,7 @@ import { osTile } from './os';
 import { promptText, confirmAction } from './TextPrompt';
 import { pickFiles } from './FilePicker';
 import { ErrorNotice } from './ErrorNotice';
+import { sftpSessionId, windowScope } from './session-scope';
 
 interface Pane {
   path: string;
@@ -15,16 +16,16 @@ interface Pane {
 
 function FolderIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" style={{ verticalAlign: -2, marginRight: 6 }}>
-      <path d="M1 3.5A1.5 1.5 0 0 1 2.5 2h3l1.5 2h6A1.5 1.5 0 0 1 14.5 5.5v6a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 1.5 11.5v-8z" fill="#5aa9e6" />
+    <svg className="hd-entry-icon folder" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M1 3.5A1.5 1.5 0 0 1 2.5 2h3l1.5 2h6A1.5 1.5 0 0 1 14.5 5.5v6a1.5 1.5 0 0 1-1.5 1.5h-10A1.5 1.5 0 0 1 1.5 11.5v-8z" />
     </svg>
   );
 }
 
 function FileIcon() {
   return (
-    <svg width="14" height="14" viewBox="0 0 16 16" style={{ verticalAlign: -2, marginRight: 6 }}>
-      <path d="M3 1.5A1.5 1.5 0 0 1 4.5 0H9l4 4v10.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 14.5v-13z" fill="#8b94a3" />
+    <svg className="hd-entry-icon file" width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M3 1.5A1.5 1.5 0 0 1 4.5 0H9l4 4v10.5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 14.5v-13z" />
     </svg>
   );
 }
@@ -56,11 +57,11 @@ export function SftpView({ host }: { host: Host | null }) {
   const [progress, setProgress] = useState<string | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number; items: MenuItem[] } | null>(null);
   const connection = useRef<Promise<string> | null>(null);
-  const sessionId = `sftp:${host?.id ?? ''}`;
+  const sessionId = sftpSessionId(host?.id ?? '');
 
   useEffect(() => {
     if (!host) return;
-    const pending = window.hopdock.ssh.connect({ hostId: host.id, purpose: 'sftp' });
+    const pending = window.hopdock.ssh.connect({ hostId: host.id, purpose: 'sftp', scope: windowScope });
     connection.current = pending;
     let disposed = false;
     void pending.then((id) => { if (disposed) void window.hopdock.ssh.close(id); }).catch(() => undefined);
@@ -146,8 +147,7 @@ export function SftpView({ host }: { host: Host | null }) {
         <div className="hd-pane-head">
           <span className="hd-tile sm" style={{ background: tile.color }}>{tile.glyph}</span>
           <strong>{host.name}</strong>
-          <span style={{ marginLeft: 'auto' }} />
-          <button className="hd-btn" type="button" disabled={busy} onClick={() => void run(() => upload(st.path))}>
+          <button className="hd-btn" type="button" style={{ marginLeft: 'auto' }} disabled={busy} onClick={() => void run(() => upload(st.path))}>
             Upload
           </button>
           <button
@@ -171,17 +171,17 @@ export function SftpView({ host }: { host: Host | null }) {
             </span>
           ))}
         </div>
-        <div style={{ overflowY: 'auto' }}>
+        <div className="hd-pane-scroll">
           {loading && st.entries.length === 0 ? (
-            <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8 }} data-testid="sftp-skeleton">
+            <div className="hd-sk-stack" data-testid="sftp-skeleton">
               {[0, 1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="hd-sk" style={{ height: 34 }} />
+                <div key={i} className="hd-sk" />
               ))}
             </div>
           ) : (
           <table className="hd-table" data-testid="sftp-table">
             <thead>
-              <tr><th>Name</th><th>Date Modified</th><th>Size</th></tr>
+              <tr><th>Name</th><th>Date modified</th><th>Size</th></tr>
             </thead>
             <tbody>
               {st.entries.filter((e) => e.filename !== '.' && e.filename !== '..').map((e) => (
@@ -230,9 +230,9 @@ export function SftpView({ host }: { host: Host | null }) {
   };
 
   return (
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
+    <div className="hd-sftp-page">
       <ErrorNotice error={err} context="File operation" onDismiss={() => setErr('')} />
-      {progress && <div role="status" style={{ fontSize: 13, color: 'var(--hd-muted)' }}>{progress}</div>}
+      {progress && <div role="status" className="hd-sftp-progress">{progress}</div>}
       <div className="hd-sftp">
         {pane('left', left)}
         {pane('right', right)}

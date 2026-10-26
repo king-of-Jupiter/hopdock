@@ -2,12 +2,13 @@ import { Icons } from './icons';
 import { IconUserCircle } from '@tabler/icons-react';
 
 export type RailView = 'hosts' | 'keys' | 'snippets' | 'settings';
+export type ThemePreference = 'system' | 'light' | 'dark';
 
 interface Props {
   view: RailView;
   onView: (v: RailView) => void;
-  theme: 'dark' | 'light';
-  onTheme: (theme: 'dark' | 'light') => void;
+  theme: ThemePreference;
+  onTheme: (theme: ThemePreference) => void;
   accountEmail?: string | null;
   onAccount?: () => void;
 }
@@ -59,6 +60,7 @@ export function RailNav({ view, onView, theme, onTheme, accountEmail, onAccount 
       <div className="hd-theme-switch" aria-label="Color theme">
         <button type="button" aria-pressed={theme === 'light'} onClick={() => onTheme('light')}><Icons.sun />Light</button>
         <button type="button" aria-pressed={theme === 'dark'} onClick={() => onTheme('dark')}><Icons.moon />Dark</button>
+        <button type="button" className="hd-theme-system" aria-pressed={theme === 'system'} title="Follow the light or dark appearance of your system" onClick={() => onTheme('system')}><Icons.monitor />System</button>
       </div>
     </nav>
   );

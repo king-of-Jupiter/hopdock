@@ -53,7 +53,7 @@ export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced, a
     try {
       const r = await window.hopdock.sync.syncNow();
       await onSynced?.();
-      setMsg(r.pushed || r.pulled ? `Sent ${r.pushed} changed items · Received ${r.pulled} changed items.` : 'Everything is synced. No changes.');
+      setMsg(r.pushed || r.pulled ? `Sent ${r.pushed} changed items, received ${r.pulled} changed items.` : 'Everything is synced. No changes.');
       await refresh();
     } catch (e) {
       setSyncError(String(e));
@@ -79,7 +79,7 @@ export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced, a
       <h1 className="hd-page-title">Settings</h1>
       <div className="hd-settings-library-heading"><h2 className="hd-sec">Host library</h2><button className="hd-btn hd-import-button" type="button" disabled={importing || busy} onClick={() => void importTermius()}><IconDownload size={16} stroke={1.6} aria-hidden="true" />{importing ? 'Importing…' : 'Import from Termius'}</button></div>
       {(importResult || importError) && <div>
-        {importResult && <div className="hd-import-result" role="status"><strong>Imported</strong><p>{importResult.hosts} hosts · {importResult.groups} groups · {importResult.keys} keys · {importResult.snippets} snippets{importResult.repaired ? ` · ${importResult.repaired} hosts repaired` : ''}{importResult.skipped > 0 ? ` · ${importResult.skipped} skipped or already imported` : ''}</p>{importResult.warnings.length > 0 && <details><summary>Import notes ({importResult.warnings.length})</summary><ul>{[...new Set(importResult.warnings)].map((note) => <li key={note}>{note}</li>)}</ul></details>}</div>}
+        {importResult && <div className="hd-import-result" role="status"><strong>Imported</strong><ul className="hd-import-counts"><li>{importResult.hosts} hosts</li><li>{importResult.groups} groups</li><li>{importResult.keys} keys</li><li>{importResult.snippets} snippets</li>{importResult.repaired ? <li>{importResult.repaired} hosts repaired</li> : null}{importResult.skipped > 0 ? <li>{importResult.skipped} skipped or already imported</li> : null}</ul>{importResult.warnings.length > 0 && <details><summary>Import notes ({importResult.warnings.length})</summary><ul>{[...new Set(importResult.warnings)].map((note) => <li key={note}>{note}</li>)}</ul></details>}</div>}
         <ErrorNotice error={importError} context="Import from Termius" onDismiss={() => setImportError('')} />
       </div>}
       <label className="hd-preference">
@@ -91,7 +91,7 @@ export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced, a
         <div className="hd-card hd-settings-panel">
           <p className="hd-dialog-note">Open a host’s menu and choose “Open in WinSCP” to manage its files with your saved credentials.</p>
           <label className="hd-form">WinSCP executable<input className="hd-input mono" readOnly value={winSCP.path ?? ''} placeholder="WinSCP was not found" /></label>
-          <div className="hd-row"><button className="hd-btn" type="button" onClick={async () => {
+          <div className="hd-row end"><button className="hd-btn" type="button" onClick={async () => {
             setWinSCPError('');
             try { const paths = await pickFiles('Choose WinSCP.exe'); if (paths?.[0]) { await window.hopdock.winscp.configure(paths[0]); setWinSCP(await window.hopdock.winscp.status()); } }
             catch (error) { setWinSCPError(String(error)); }
@@ -100,11 +100,11 @@ export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced, a
         </div>
       </>}
       <div className="hd-sec">Application updates</div>
-      <div className="hd-card" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'stretch' }}>
-        <div style={{ fontSize: 13 }}>
+      <div className="hd-card hd-settings-panel">
+        <div className="hd-setting-line">
           Current version: <strong>{window.hopdock?.version ?? 'dev'}</strong>
         </div>
-        <div style={{ fontSize: 12, color: 'var(--hd-muted)', marginTop: 4 }}>
+        <div className="hd-dialog-note">
           {update.state === 'idle' && 'Updates install automatically from GitHub Releases.'}
           {update.state === 'up-to-date' && `You’re up to date. Latest release: ${update.version ?? window.hopdock.version}.`}
           {update.state === 'checking' && 'Checking for updates…'}
@@ -113,7 +113,7 @@ export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced, a
           {update.state === 'downloaded' && `Version ${update.version ?? ''} downloaded — restart to install.`}
         </div>
         {update.state === 'error' && <ErrorNotice error={update.message || 'Update failed'} context="Check updates" onDismiss={() => setUpdate({ state: 'idle' })} />}
-        <div className="hd-row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
+        <div className="hd-row end">
           <button className="hd-btn" type="button" disabled={busy || update.state === 'checking' || update.state === 'available' || update.state === 'downloading' || update.state === 'downloaded'} onClick={() => void window.hopdock.updater.check().catch((error) => setUpdate({ state: 'error', message: String(error) }))}>
             Check for updates
           </button>
@@ -122,28 +122,29 @@ export function SettingsView({ hideGroupedHosts, onHideGroupedHosts, onSynced, a
         {update.checkedAt && <p className="hd-dialog-note">Last checked: {new Date(update.checkedAt).toLocaleString()}</p>}
       </div>
       <div className="hd-sec">Cloud sync</div>
-      <div className="hd-card" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'stretch' }}>
+      <div className="hd-card hd-settings-panel">
         <div className="hd-settings-account">
           <div><strong>{account?.signedIn ? account.email : 'Sign in to sync your library'}</strong><p className="hd-dialog-note">{account?.signedIn ? 'Hosts, keys and snippets sync automatically.' : 'Your local library works without an account.'}</p></div>
           <button className="hd-btn" type="button" onClick={onAccount}>{account?.signedIn ? 'Account' : 'Sign in'}</button>
         </div>
         {!status?.backendConfigured && <p className="hd-dialog-note">Cloud sync is unavailable in this build.</p>}
-        <div className="hd-form" style={{ marginTop: 16 }}>
+        <hr className="hd-settings-divider" />
+        <div className="hd-form">
           <label>Sync encryption password<input className="hd-input" type="password" autoComplete="off" minLength={12} value={encryptionPassword} onChange={(e) => setEncryptionPassword(e.target.value)} placeholder={status?.passwordsConfigured ? 'Saved on this device' : 'At least 12 characters'} /></label>
-          <div style={{ fontSize: 12, color: 'var(--hd-muted)' }}>Use the same encryption password on every device. It encrypts host passwords, private keys and snippets before upload. Keep it safe: it cannot be recovered or changed after the first successful sync.</div>
-          <div className="hd-row" style={{ justifyContent: 'flex-end' }}><button className="hd-btn" type="button" disabled={busy || encryptionPassword.length < 12} onClick={() => void saveEncryptionPassword()}>Save encryption password</button></div>
+          <div className="hd-dialog-note">Use the same encryption password on every device. It encrypts host passwords, private keys and snippets before upload. Keep it safe: it cannot be recovered or changed after the first successful sync.</div>
+          <div className="hd-row end"><button className="hd-btn" type="button" disabled={busy || encryptionPassword.length < 12} onClick={() => void saveEncryptionPassword()}>Save encryption password</button></div>
         </div>
         <button className="hd-btn" type="button" disabled={busy || status?.syncing || !status?.configured || !status?.passwordsConfigured} onClick={() => void syncNow()}>{status?.syncing ? 'Syncing…' : 'Sync now'}</button>
-        <div style={{ fontSize: 12, color: 'var(--hd-muted)', marginTop: 8 }}>
+        <div className="hd-dialog-note">
           {status?.syncing ? 'Syncing changes…' : status?.configured && status.passwordsConfigured ? 'Automatic sync is on.' : 'Sync is not configured.'}
           {status && Date.parse(status.lastSyncAt) > 0 && ` Last synced: ${new Date(status.lastSyncAt).toLocaleString()}.`}
           {msg && <div>{msg}</div>}
         </div>
         <ErrorNotice error={syncError || status?.lastError} context="Vault sync" onDismiss={() => { setSyncError(''); setStatus((previous) => previous ? { ...previous, lastError: null } : previous); }} />
       </div>
-      <div className="hd-card" style={{ cursor: 'default', flexDirection: 'column', alignItems: 'stretch' }}>
-        <h3 style={{ margin: '0 0 8px', fontSize: 13 }}>What syncs</h3>
-        <div style={{ fontSize: 12, color: 'var(--hd-muted)' }}>
+      <div className="hd-card hd-settings-panel">
+        <h3>What syncs</h3>
+        <div className="hd-dialog-note">
           Host passwords, Keychain private keys with their passphrases, and Snippets sync with end-to-end encryption.
           Received keys and snippets are ready to use on this device. Host metadata and public key details are not end-to-end encrypted.
         </div>

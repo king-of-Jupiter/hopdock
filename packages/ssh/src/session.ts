@@ -1,6 +1,7 @@
 import ssh2 from 'ssh2';
 import type { Client, ClientChannel, SFTPWrapper } from 'ssh2';
 import { posix } from 'node:path';
+import { createHash } from 'node:crypto';
 
 export interface ConnectOpts {
   host: string;
@@ -31,6 +32,18 @@ export interface DirEntry {
 
 export type Emit = (channel: string, payload: unknown) => void;
 
+/** Connection stages reported on `ssh:progress` while a session is being opened. No secrets are ever included. */
+export type ConnectStage = 'socket' | 'connected' | 'hostkey' | 'handshake' | 'auth' | 'shell' | 'ready';
+export interface ConnectProgress { id: string; stage: ConnectStage; detail?: string }
+
+export function authMethods(opts: ConnectOpts): string[] {
+  const methods: string[] = [];
+  if (opts.privateKey) methods.push('publickey');
+  if (opts.agent) methods.push('agent');
+  if (opts.password) methods.push('password');
+  return methods;
+}
+
 interface Session {
   client: Client;
   shell?: ClientChannel;
@@ -52,11 +65,20 @@ export class SessionManager {
     const session: Session = { client };
     client.on('banner', (message: string) => { session.banner = message.slice(0, 4096); });
     this.sessions.set(id, session);
+    let opening = true;
+    const progress = (stage: ConnectStage, detail?: string) => { if (opening && this.sessions.get(id) === session) this.emit('ssh:progress', { id, stage, detail } satisfies ConnectProgress); };
+    progress('socket', `${opts.host.includes(':') ? `[${opts.host}]` : opts.host}:${opts.port}`);
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     try { await new Promise<void>((resolve, reject) => {
       timer = setTimeout(() => reject(new Error('SSH ready timeout')), opts.readyTimeoutMs ?? DEFAULT_TIMEOUT);
+      client.on('connect', () => progress('connected'));
+      client.on('handshake', (negotiated: { cs?: { cipher?: string } }) => {
+        progress('handshake', negotiated?.cs?.cipher);
+        progress('auth', `${opts.username} (${authMethods(opts).join(', ') || 'none'})`);
+      });
       client.on('ready', () => {
+        progress('shell');
         client.shell({ term: 'xterm-256color', cols, rows }, (err, stream) => {
           clearTimeout(timer);
           if (err) {
@@ -64,6 +86,7 @@ export class SessionManager {
             return;
           }
           session.shell = stream;
+          progress('ready');
           stream.on('data', (d: Buffer) => this.emit('ssh:data', { id, data: d.toString('base64') }));
           stream.stderr.on('data', (d: Buffer) => this.emit('ssh:data', { id, data: d.toString('base64') }));
           stream.on('close', () => { if (this.sessions.get(id) === session) this.emit('ssh:close', { id }); });
@@ -93,12 +116,15 @@ export class SessionManager {
         privateKey: opts.privateKey,
         passphrase: opts.passphrase,
         agent: opts.agent,
+        // Hosts are trusted on first use, as before; the fingerprint is only reported so the user can see it.
+        hostVerifier: (key: Buffer) => { progress('hostkey', `SHA256:${createHash('sha256').update(key).digest('base64').replace(/=+$/, '')}`); return true; },
         authHandler: opts.privateKey && opts.password ? ['publickey', 'password', 'keyboard-interactive'] : undefined,
         tryKeyboard: !!opts.password,
         readyTimeout: opts.readyTimeoutMs ?? DEFAULT_TIMEOUT,
         keepaliveInterval: 15000,
       });
-    }); } catch (error) {
+    }); opening = false; } catch (error) {
+      opening = false;
       clearTimeout(timer);
       if (this.sessions.get(id) === session) this.sessions.delete(id);
       client.destroy();

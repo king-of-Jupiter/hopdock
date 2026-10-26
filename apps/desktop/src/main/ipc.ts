@@ -1,6 +1,8 @@
 import { handleIpc } from './handle-ipc';
 import { randomUUID } from 'node:crypto';
 import { app, BrowserWindow, dialog } from 'electron';
+import type { WebContents } from 'electron';
+import { broadcast, openSessionWindow } from './windows';
 import { explainError } from '@hopdock/core';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { planTermiusImport } from './termius-import';
@@ -48,7 +50,7 @@ function accountStatus() {
     email: getSecret('sync:email'), backendConfigured: !!(supabaseUrl && supabasePublishableKey) };
 }
 function publishAccountStatus() {
-  if (win && !win.isDestroyed()) win.webContents.send('auth:statusChanged', accountStatus());
+  broadcast('auth:statusChanged', accountStatus());
 }
 async function signInAccount(creds: SyncCredsInput, create = false) {
   if (authBusy) throw new Error('Wait for sign-in to finish.');
@@ -100,7 +102,7 @@ function syncStatus() {
 }
 function publishSyncStatus() {
   try {
-    if (win && !win.isDestroyed()) win.webContents.send('sync:statusChanged', syncStatus());
+    broadcast('sync:statusChanged', syncStatus());
   } catch { /* A corrupt vault is reported by the normal library/error flow. */ }
 }
 onVaultSaved(() => { vaultRevision++; automaticSync.schedule(); });
@@ -121,9 +123,28 @@ function requireSyncIdle(strict = false): void {
 
 export function setWindow(w: BrowserWindow): void {
   win = w;
-  (mgr as unknown as { emit: (c: string, p: unknown) => void }).emit = (channel, payload) => {
-    win?.webContents.send(channel, payload);
-  };
+  (mgr as unknown as { emit: (c: string, p: unknown) => void }).emit = broadcast;
+}
+
+/** Sessions belong to the window that opened them and close with it. */
+const windowSessions = new Map<number, Set<string>>();
+function ownSession(sender: WebContents, sessionId: string): void {
+  let owned = windowSessions.get(sender.id);
+  if (!owned) {
+    const contentsId = sender.id;
+    owned = new Set();
+    windowSessions.set(contentsId, owned);
+    sender.once('destroyed', () => {
+      for (const id of windowSessions.get(contentsId) ?? []) void mgr.close(id).catch(() => undefined);
+      windowSessions.delete(contentsId);
+    });
+  }
+  owned.add(sessionId);
+}
+function dialogParent(sender: WebContents): BrowserWindow {
+  const parent = BrowserWindow.fromWebContents(sender) ?? win;
+  if (!parent || parent.isDestroyed()) throw new Error('Application window is unavailable.');
+  return parent;
 }
 
 function vault() {
@@ -158,13 +179,13 @@ async function connectOptsFor(hostId: string): Promise<ConnectOpts> {
 }
 
 export function registerIpc(): void {
-  handleIpc('files:pick', async (_e, title: string, options: { save?: boolean; multiple?: boolean; filename?: string } = {}) => {
-    if (!win) throw new Error('Application window is unavailable.');
+  handleIpc('files:pick', async (e, title: string, options: { save?: boolean; multiple?: boolean; filename?: string } = {}) => {
+    const parent = dialogParent(e.sender);
     if (options.save) {
-      const result = await dialog.showSaveDialog(win, { title, defaultPath: options.filename, properties: ['createDirectory', 'showOverwriteConfirmation'] });
+      const result = await dialog.showSaveDialog(parent, { title, defaultPath: options.filename, properties: ['createDirectory', 'showOverwriteConfirmation'] });
       return result.canceled || !result.filePath ? null : [result.filePath];
     }
-    const result = await dialog.showOpenDialog(win, { title, properties: options.multiple ? ['openFile', 'multiSelections'] : ['openFile'] });
+    const result = await dialog.showOpenDialog(parent, { title, properties: options.multiple ? ['openFile', 'multiSelections'] : ['openFile'] });
     return result.canceled ? null : result.filePaths;
   });
   handleIpc('winscp:status', () => ({ supported: process.platform === 'win32', path: findWinSCP(getSecret('winscp:path')) }));
@@ -314,9 +335,13 @@ export function registerIpc(): void {
     }
   });
 
-  handleIpc('ssh:connect', async (_e, hostId: string, cols?: number, rows?: number, purpose?: 'sftp') => {
+  handleIpc('ssh:connect', async (e, hostId: string, cols?: number, rows?: number, purpose?: 'sftp', scope?: string, instance?: number) => {
+    if (scope !== undefined && !/^w\d{1,6}$/.test(scope)) throw new Error('invalid window scope');
+    if (instance !== undefined && (!Number.isInteger(instance) || instance < 1 || instance > 999)) throw new Error('invalid session instance');
     const opts = await connectOptsFor(hostId);
-    const sessionId = purpose === 'sftp' ? `sftp:${hostId}` : hostId;
+    // A second tab to the same host gets its own session: `<hostId>#2`.
+    const sessionId = `${scope ? `${scope}:` : ''}${purpose === 'sftp' ? `sftp:${hostId}` : hostId}${purpose !== 'sftp' && instance && instance > 1 ? `#${instance}` : ''}`;
+    ownSession(e.sender, sessionId);
     await mgr.connect(sessionId, opts, cols ?? 80, rows ?? 24);
     const connection = mgr.sessionIdentity(sessionId);
     void detectRemoteOs((command) => mgr.exec(sessionId, command, { timeoutMs: 1800, maxOutputBytes: 16384 }), mgr.banner(sessionId)).then((os) => {
@@ -327,11 +352,15 @@ export function registerIpc(): void {
       const host = data.hosts.find((host) => host.id === hostId);
       if (!host || host.host !== opts.host || host.port !== opts.port || host.username !== opts.username) return;
       host.os = os; host.updatedAt = new Date().toISOString(); saveVault(data);
-      if (win && !win.isDestroyed()) win.webContents.send('vault:hostUpdated', host);
+      broadcast('vault:hostUpdated', host);
       };
       persist();
     }).catch(() => { /* OS detection is optional and never breaks an established session. */ });
     return sessionId;
+  });
+  handleIpc('window:openSession', (e, hostId: string) => {
+    if (!vault().hosts.some((h) => h.id === hostId)) throw new Error('unknown host');
+    openSessionWindow(hostId, BrowserWindow.fromWebContents(e.sender));
   });
   handleIpc('ssh:write', (_e, id: string, dataB64: string) => mgr.write(id, dataB64));
   handleIpc('ssh:resize', (_e, id: string, cols: number, rows: number) => mgr.resize(id, cols, rows));
@@ -593,7 +622,7 @@ async function performSync() {
         if (getSecret('sync:email')) setSecret('sync:ownerEmail', getSecret('sync:email')!);
         deleteSecret('sync:pass'); publishAccountStatus();
       }
-      if (win && !win.isDestroyed()) win.webContents.send('vault:updated');
+      broadcast('vault:updated');
     }
     return { pushed: result.pushed, pulled: result.pulled };
   } catch (err) {

@@ -34,13 +34,17 @@ const api: HopdockApi = {
     setSecret: (key, value) => invoke('vault:setSecret', key, value),
   },
   ssh: {
-    connect: (params) => invoke('ssh:connect', params.hostId, params.cols, params.rows, params.purpose),
+    connect: (params) => invoke('ssh:connect', params.hostId, params.cols, params.rows, params.purpose, params.scope, params.instance),
     write: (id, dataB64) => invoke('ssh:write', id, dataB64),
     resize: (id, cols, rows) => invoke('ssh:resize', id, cols, rows),
     exec: (id, command) => invoke('ssh:exec', id, command),
     close: (id) => invoke('ssh:close', id),
     onData: (cb) => on('ssh:data', cb),
     onClose: (cb) => on('ssh:close', cb),
+    onProgress: (cb) => on('ssh:progress', cb),
+  },
+  windows: {
+    openSession: (hostId) => invoke('window:openSession', hostId),
   },
   sftp: {
     list: (id, path) => invoke('sftp:list', id, path),

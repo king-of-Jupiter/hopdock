@@ -1,6 +1,6 @@
 {
-  "date": "2026-10-13T23:23:19.075Z",
-  "profile": "C:\\Users\\freshh\\AppData\\Local\\Temp\\hopdock-desktop-test-7qNBLQ",
+  "date": "2026-10-26T23:19:27.428Z",
+  "profile": "C:\\Users\\freshh\\AppData\\Local\\Temp\\hopdock-desktop-test-VivX0U",
   "results": [
     {
       "name": "Welcome sign-in screen, confirmation flow and local/offline access",
@@ -120,6 +120,10 @@
     },
     {
       "name": "Settings direct Termius import: no file picker, credentials, keys, snippets, duplicates and safe failures",
+      "passed": true
+    },
+    {
+      "name": "Connection screen stages, detailed auth failure, mouse drag into a group, tab menu, a duplicate session and a second window",
       "passed": true
     }
   ],

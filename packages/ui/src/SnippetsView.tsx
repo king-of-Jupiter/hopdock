@@ -58,15 +58,15 @@ export function SnippetsView({ snippets, hosts, onChanged }: Props) {
     <>
       <div className="hd-toolbar">
         <button className="hd-btn primary" type="button" onClick={() => setEditing({ name: '', folder: folder ?? 'general', script: '' })}>
-          NEW SNIPPET
+          New snippet
         </button>
-        <select className="hd-input" style={{ maxWidth: 220 }} value={folder ?? ''} onChange={(e) => setFolder(e.target.value || null)}>
+        <select className="hd-input" value={folder ?? ''} onChange={(e) => setFolder(e.target.value || null)}>
           <option value="">All folders</option>
           {folders.map((f) => (
             <option key={f} value={f}>{f}</option>
           ))}
         </select>
-        <select className="hd-input" style={{ maxWidth: 260 }} value={targetId} onChange={(e) => setTargetId(e.target.value)}>
+        <select className="hd-input" value={targetId} onChange={(e) => setTargetId(e.target.value)}>
           {hosts.map((h) => (
             <option key={h.id} value={h.id}>{h.name} ({h.username}@{h.host})</option>
           ))}
@@ -90,9 +90,9 @@ export function SnippetsView({ snippets, hosts, onChanged }: Props) {
                 <td><strong>{s.name}</strong></td>
                 <td><span className="hd-badge">{s.folder}</span></td>
                 <td>
-                  <code style={{ fontFamily: 'var(--hd-font-mono)', fontSize: 12 }}>{s.script}</code>
+                  <code>{s.script}</code>
                   {s.vars.length > 0 && (
-                    <div className="hd-row" style={{ marginTop: 6 }}>
+                    <div className="hd-row">
                       {s.vars.map((v) => (
                         <input
                           key={v}
@@ -105,14 +105,14 @@ export function SnippetsView({ snippets, hosts, onChanged }: Props) {
                     </div>
                   )}
                 </td>
-                <td style={{ whiteSpace: 'nowrap' }}>
-                  <button className="hd-btn primary" type="button" disabled={busy} onClick={() => void run(s)}>
+                <td className="actions">
+                  <button className="hd-btn quiet run" type="button" disabled={busy} onClick={() => void run(s)}>
                     Run
-                  </button>{' '}
-                  <button className="hd-btn" type="button" disabled={busy} onClick={() => setEditing({ id: s.id, name: s.name, folder: s.folder, script: s.script })}>
+                  </button>
+                  <button className="hd-btn quiet" type="button" disabled={busy} onClick={() => setEditing({ id: s.id, name: s.name, folder: s.folder, script: s.script })}>
                     Edit
-                  </button>{' '}
-                  <button className="hd-btn" type="button" disabled={busy} onClick={() => { void confirmAction(`Delete ${s.name}?`, 'The snippet will be removed from this library and synced devices.').then(async (yes) => { if (yes) { try { await window.hopdock.snippets.remove(s.id); onChanged(); } catch (error) { setErr(String(error)); } } }); }}>
+                  </button>
+                  <button className="hd-btn quiet danger" type="button" disabled={busy} onClick={() => { void confirmAction(`Delete ${s.name}?`, 'The snippet will be removed from this library and synced devices.').then(async (yes) => { if (yes) { try { await window.hopdock.snippets.remove(s.id); onChanged(); } catch (error) { setErr(String(error)); } } }); }}>
                     Delete
                   </button>
                 </td>

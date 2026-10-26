@@ -1,13 +1,15 @@
 export { AppShell } from './AppShell';
 export { AuthScreen, AccountDrawer } from './AccountView';
 export { RailNav } from './RailNav';
-export type { RailView } from './RailNav';
+export type { RailView, ThemePreference } from './RailNav';
 export { TopTabs } from './TopTabs';
 export type { Tab } from './TopTabs';
+export { sessionTabLabel } from './TopTabs';
 export { HostsView } from './HostsView';
 export { HostForm } from './HostForm';
 export type { HostDraft } from './HostForm';
 export { TerminalView } from './TerminalView';
+export { launchHostId, windowScope, terminalSessionId } from './session-scope';
 export { SftpView } from './SftpView';
 export { KeychainView } from './KeychainView';
 export { SnippetsView } from './SnippetsView';

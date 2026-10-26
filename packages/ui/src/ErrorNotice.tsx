@@ -13,7 +13,7 @@ export function ErrorNotice({ error, context = '', onDismiss, onRetry }: { error
         {issue.action && <button className="hd-btn" type="button" onClick={() => window.dispatchEvent(new CustomEvent('hopdock:navigate', { detail: issue.action }))}>{issue.action === 'keys' ? 'Open Keychain' : issue.action === 'settings' ? 'Open Settings' : 'Open hosts'}</button>}
         {onRetry && <button className="hd-btn" type="button" onClick={onRetry}>Try again</button>}
       </div>}
-      <details className="hd-error-details"><summary>Error details</summary><code>{issue.code}{issue.operation ? ` · ${issue.operation}` : ''}</code></details>
+      <details className="hd-error-details"><summary>Error details</summary><code>{issue.code}{issue.operation ? ` (${issue.operation})` : ''}</code></details>
     </div>
     {onDismiss && <button className="hd-icon-btn hd-error-dismiss" type="button" aria-label="Dismiss error" onClick={onDismiss}><Icons.close /></button>}
   </div>;
